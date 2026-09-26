@@ -1,6 +1,6 @@
 // People directory: a single live listener on users, shared by every screen.
 import { col, watch, query, where, orderBy } from '../core/fb.js';
-import { session, isHR } from '../core/session.js';
+import { session, isHR, seesAll } from '../core/session.js';
 
 let people = [];
 let ready = null;
@@ -29,7 +29,7 @@ export const person = (email) => people.find(p => p.email === email) || null;
 export const nameOf = (email) => (person(email) || {}).name || (email ? String(email).split('@')[0] : '—');
 /** People the current user manages: everyone for HR/admin, direct reports for leaders */
 export function managedPeople() {
-  if (isHR()) return activePeople();
+  if (seesAll()) return activePeople();
   return activePeople().filter(p => p.leaderEmail === session.email);
 }
 export const teamOf = (leaderEmail) => activePeople().filter(p => p.leaderEmail === leaderEmail);

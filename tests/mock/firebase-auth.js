@@ -61,3 +61,17 @@ export async function reauthenticateWithCredential(user, cred) {
   const all = loadUsers(); if (!all[user.email] || all[user.email].password !== cred.password) throw err('auth/wrong-password');
   return { user };
 }
+
+// password-reset codes: tests put { code: email } into localStorage 'mockauth_codes'
+export async function verifyPasswordResetCode(auth, code) {
+  const codes = JSON.parse(localStorage.getItem('mockauth_codes') || '{}');
+  if (!codes[code]) throw err('auth/invalid-action-code');
+  return codes[code];
+}
+export async function confirmPasswordReset(auth, code, pw) {
+  const codes = JSON.parse(localStorage.getItem('mockauth_codes') || '{}');
+  const email = codes[code]; if (!email) throw err('auth/expired-action-code');
+  if (!pw || pw.length < 6) throw err('auth/weak-password');
+  const all = loadUsers(); all[email] = { ...(all[email] || {}), password: pw }; saveUsers(all);
+  delete codes[code]; localStorage.setItem('mockauth_codes', JSON.stringify(codes));
+}

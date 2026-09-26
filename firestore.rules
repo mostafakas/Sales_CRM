@@ -17,6 +17,9 @@ service cloud.firestore {
     function role() { return prof().get('role', 'employee'); }
     function isAdmin() { return active() && role() == 'admin'; }
     function isHR() { return active() && role() in ['hr', 'supervisor', 'admin']; }
+    function isPM() { return active() && role() == 'pm'; }
+    // company-wide read access (HR, project managers)
+    function seesAll() { return isHR() || isPM(); }
     function isFinance() { return active() && (role() in ['finance', 'admin'] || prof().get('permissions', {}).get('payroll', false) == true); }
     function hasCRM() { return active() && (role() == 'admin' || prof().get('permissions', {}).get('crm', false) == true); }
     function leads(email) { return exists(uPath(email)) && get(uPath(email)).data.get('leaderEmail', '') == me(); }
@@ -74,7 +77,7 @@ service cloud.firestore {
 
       // HR creates accounts; only admins create admin / finance accounts or grant payroll access
       allow create: if isHR() && email == email.lower()
-        && (isAdmin() || (!(request.resource.data.get('role', 'employee') in ['admin', 'finance']) && !payrollOf(request.resource.data)));
+        && (isAdmin() || (!(request.resource.data.get('role', 'employee') in ['admin', 'finance', 'pm']) && !payrollOf(request.resource.data)));
       allow delete: if isAdmin() && email != me();
 
       // HR / admin edit profiles. Non-admin HR: never admin accounts, never finance role or payroll access,
@@ -82,7 +85,7 @@ service cloud.firestore {
       allow update: if isHR() && (isAdmin() || (
             resource.data.get('role', '') != 'admin'
          && request.resource.data.get('role', '') != 'admin'
-         && (!('role' in affected()) || (!(resource.data.get('role', '') in ['finance']) && !(request.resource.data.role in ['finance'])))
+         && (!('role' in affected()) || (!(resource.data.get('role', '') in ['finance', 'pm']) && !(request.resource.data.role in ['finance', 'pm'])))
          && payrollOf(request.resource.data) == payrollOf(resource.data)
          && (email != me() || !affected().hasAny(['role', 'permissions', 'isSuspended']))
       ));
@@ -142,7 +145,7 @@ service cloud.firestore {
         return d.get('checkOutMs', null) == null
           || (d.checkOutMs <= nowMs() + 300000 && (d.get('autoClosed', false) == true || d.checkOutMs >= nowMs() - 300000));
       }
-      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow read: if active() && (resource == null || resource.data.email == me() || seesAll() || isFinance() || resource.data.get('leaderEmail', '') == me());
       // HR corrections (not on their own days)
       allow write: if isHR() && othersOnly();
       // self create (start of day, or closing a forgotten day)
@@ -172,14 +175,14 @@ service cloud.firestore {
       allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending', 'updatedAt']) && request.resource.data.remotePending == false;
     }
     match /logs/{id} {
-      allow read: if active() && (resource.data.user == me() || isHR() || resource.data.get('leaderEmail', '') == me());
+      allow read: if active() && (resource.data.user == me() || seesAll() || resource.data.get('leaderEmail', '') == me());
       allow create: if active() && (request.resource.data.user == me() || isHR()) && request.resource.data.timestamp == request.time;
       // only re-pointed when an admin changes someone's username
       allow update: if isAdmin() && onlyChanged(['user', 'leaderEmail']);
       allow delete: if isAdmin();
     }
     match /schedules/{id} {
-      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow read: if active() && (resource == null || resource.data.email == me() || seesAll() || isFinance() || resource.data.get('leaderEmail', '') == me());
       allow write: if (isHR() && othersOnly())
         || (active() && request.resource != null && leads(request.resource.data.email) && request.resource.data.get('leaderEmail', '') == me()
             && (resource == null || resource.data.email == request.resource.data.email));
@@ -188,7 +191,7 @@ service cloud.firestore {
     // ---------- requests ----------
     match /requests/{id} {
       function stageFields() { return ['status', 'updatedAt', 'history', 'decidedBy', 'approvedBy', 'approvedAt']; }
-      allow read: if active() && (resource.data.email == me() || resource.data.get('leaderEmail', '') == me() || isHR() || isFinance());
+      allow read: if active() && (resource.data.email == me() || resource.data.get('leaderEmail', '') == me() || seesAll() || isFinance());
       // HR/admin may file on someone else's behalf (and the migration imports old requests); own requests follow the normal path
       allow create: if (isHR() && othersOnly()) || (active()
         && request.resource.data.email == me()
@@ -219,7 +222,7 @@ service cloud.firestore {
 
     // ---------- leave balances ----------
     match /balances/{id} {
-      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || leads(resource.data.email));
+      allow read: if active() && (resource == null || resource.data.email == me() || seesAll() || isFinance() || leads(resource.data.email));
       allow write: if isHR() && othersOnly();
     }
     match /balance_ledger/{id} {
@@ -256,6 +259,64 @@ service cloud.firestore {
         && request.resource.data.get('read', false) == false && request.resource.data.get('title', '').size() < 300;
       allow update: if signedIn() && resource.data.to == me() && onlyChanged(['read']);
       allow delete: if signedIn() && resource.data.to == me();
+    }
+    // ---------- chat (1:1) ----------
+    function chatDoc(id) { return get(/databases/$(database)/documents/chats/$(id)).data; }
+    function inChat(id) { return active() && me() in chatDoc(id).members; }
+    match /chats/{id} {
+      allow read: if active() && (resource == null || me() in resource.data.members || isAdmin());
+      allow create: if active()
+        && request.resource.data.members is list && request.resource.data.members.size() == 2
+        && me() in request.resource.data.members
+        && request.resource.data.members[0] < request.resource.data.members[1]
+        && id == request.resource.data.members[0] + '__' + request.resource.data.members[1]
+        && exists(uPath(request.resource.data.members[0])) && exists(uPath(request.resource.data.members[1]));
+      // members: last message, unread counters, read receipts
+      allow update: if active() && me() in resource.data.members
+        && request.resource.data.members == resource.data.members
+        && onlyChanged(['lastMessage', 'updatedAt', 'unread', 'lastRead']);
+      // admin: archive
+      allow update: if isAdmin() && request.resource.data.members == resource.data.members
+        && onlyChanged(['archivedAt', 'archivedBy', 'archivedCount', 'lastMessage', 'updatedAt']);
+      allow delete: if isAdmin();
+
+      match /messages/{m} {
+        allow read: if isAdmin() || inChat(id);
+        allow create: if inChat(id) && request.resource.data.by == me() && request.resource.data.at == request.time
+          && request.resource.data.keys().hasOnly(['by', 'type', 'text', 'file', 'at'])
+          && request.resource.data.type in ['text', 'image', 'file']
+          && request.resource.data.text is string && request.resource.data.text.size() <= 4000
+          && (!('file' in request.resource.data) || (request.resource.data.file is map && request.resource.data.file.get('thumb', '').size() < 150000));
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+    }
+    match /chat_archive/{id} {
+      allow read, write: if isAdmin();
+      match /messages/{m} { allow read, write: if isAdmin(); }
+    }
+    match /chat_files/{f} {
+      allow read: if active() && (isAdmin() || me() in chatDoc(resource.data.chatId).members);
+      allow create: if active() && request.resource.data.by == me() && me() in chatDoc(request.resource.data.chatId).members
+        && request.resource.data.size is number && request.resource.data.size <= 5300000 && request.resource.data.chunks is int && request.resource.data.chunks <= 10;
+      allow delete: if isAdmin();
+      match /chunks/{i} {
+        function fileDoc() { return get(/databases/$(database)/documents/chat_files/$(f)).data; }
+        allow read: if active() && (isAdmin() || me() in chatDoc(fileDoc().chatId).members);
+        allow create: if active() && fileDoc().by == me() && request.resource.data.data is string && request.resource.data.data.size() <= 700000;
+        allow delete: if isAdmin();
+      }
+    }
+
+    // what each user did (sign-ins, requests, approvals, settings…) — admins only
+    match /activity/{id} {
+      allow read: if isAdmin();
+      allow create: if active() && request.resource.data.by == me() && request.resource.data.at == request.time
+        && request.resource.data.keys().hasOnly(['by', 'name', 'action', 'target', 'detail', 'at'])
+        && request.resource.data.action is string && request.resource.data.action.size() < 60
+        && request.resource.data.get('detail', '').size() <= 300;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
     match /audit_log/{id} {
       allow read: if isHR();

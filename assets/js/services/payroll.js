@@ -6,6 +6,7 @@ import { fmtMonth } from '../core/utils.js';
 import { activePeople, person } from './directory.js';
 import { teamMonth } from './reports.js';
 import { notify } from './notify.js';
+import { track } from './activity.js';
 
 export const itemId = (month, email) => `${month}_${email}`;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -69,6 +70,7 @@ export async function buildRun(month) {
   }
   b.set(doc(db, 'payroll_runs', month), { month, status: 'draft', count, totalNet: r2(total), builtBy: session.email, builtAt: serverTimestamp() }, { merge: true });
   await b.commit();
+  track('payroll.build', { target: month, detail: `${count}` });
 }
 
 export async function saveManual(month, email, manual) {
@@ -82,6 +84,7 @@ export async function saveManual(month, email, manual) {
 }
 
 export async function setRunStatus(month, status) {
+  track('payroll.' + status, { target: month });
   const items = await list(query(col('payroll_items'), where('month', '==', month)));
   const b = writeBatch(db);
   b.set(doc(db, 'payroll_runs', month), { status, [`${status}At`]: serverTimestamp(), [`${status}By`]: session.email, totalNet: r2(items.reduce((s, i) => s + (i.net || 0), 0)), count: items.length }, { merge: true });
@@ -92,6 +95,7 @@ export async function setRunStatus(month, status) {
 
 /** Mark items paid: treasury entry per person + advance installments recorded. */
 export async function markPaid(month, emails) {
+  track('payroll.pay', { target: month, detail: `${emails.length}` });
   const items = (await list(query(col('payroll_items'), where('month', '==', month)))).filter(i => emails.includes(i.email) && i.status !== 'paid');
   for (const i of items) {
     await runTransaction(db, async (tx) => {

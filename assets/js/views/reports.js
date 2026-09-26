@@ -1,7 +1,7 @@
 // Monthly reports: company / department / team / person, with Excel & PDF export and month close.
 import { L, esc, num, fmtMonth, addMonths, ym as ymOf, fmtHours, fmtMin, fmtDate, money } from '../core/utils.js';
 import { toast, toastErr, avatar, empty, loader, busy, confirmDialog } from '../core/ui.js';
-import { session, now, isHR, isFinance } from '../core/session.js';
+import { session, now, isHR, isFinance, seesAll } from '../core/session.js';
 import { leaveTypes, leaveTypeLabel, policy } from '../core/policy.js';
 import { read, setDoc, doc, db, serverTimestamp, toMs } from '../core/fb.js';
 import { teamMonth, STATUS_DAY } from '../services/reports.js';
@@ -11,7 +11,7 @@ import { exportSheet } from './export.js';
 
 export default async function render(root) {
   let month = addMonths(ymOf(now()), 0), data = null, dept = '', tab = 'summary', snapshot = null;
-  const wide = isHR() || isFinance();
+  const wide = seesAll() || isFinance();
   root.innerHTML = `
     <div class="page-head no-print"><div><h2>${L('التقارير الشهرية', 'Monthly reports')}</h2><p>${wide ? L('تقرير الشركة والأقسام وكل موظف.', 'Company, departments and each employee.') : L('تقرير فريقك.', 'Your team report.')}</p></div>
       <div class="row gap-8"><button class="btn btn-icon" data-m="-1"><i class="fas fa-chevron-right" data-flip></i></button><b id="ml" style="min-width:130px;text-align:center"></b><button class="btn btn-icon" data-m="1"><i class="fas fa-chevron-left" data-flip></i></button></div></div>

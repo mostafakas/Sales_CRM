@@ -3,7 +3,7 @@
 import {
   db, doc, col, addDoc, updateDoc, setDoc, getDoc, runTransaction, serverTimestamp, arrayUnion, list, query, where, read, watch, toMs
 } from '../core/fb.js';
-import { session, now, isHR } from '../core/session.js';
+import { session, now, isHR, seesAll, isAdmin } from '../core/session.js';
 import {
   policy, leaveType, leaveTypes, stagesFor, firstStatus, nextStatus, planFor, typeLabel, statusLabel
 } from '../core/policy.js';
@@ -12,6 +12,7 @@ import { userError } from '../core/ui.js';
 import { notify, notifyMany } from './notify.js';
 import { activePeople, person, nameOf } from './directory.js';
 import { correctDay } from './attendance.js';
+import { track } from './activity.js';
 
 // ---------- balances ----------
 export const balanceId = (email, year) => `${email}_${year}`;
@@ -48,6 +49,7 @@ export async function adjustBalance(email, year, typeId, { entitled, adjustDelta
     tx.set(r, { ...cur, updatedAt: serverTimestamp() });
     tx.set(doc(col('balance_ledger')), { email, year: Number(year), type: typeId, delta: Number(adjustDelta || 0), entitled: t.entitled, reason: note || 'manual', by: session.email, at: serverTimestamp() });
   });
+  track('balance.adjust', { target: email, detail: `${typeId} ${Number(adjustDelta || 0) >= 0 ? '+' : ''}${Number(adjustDelta || 0)} — ${note || ''}` });
 }
 
 // ---------- schedules ----------
@@ -79,6 +81,8 @@ export function watchInbox(cb) {
   const unsubs = [];
   unsubs.push(watch(query(col('requests'), where('leaderEmail', '==', session.email), where('status', '==', 'pending_leader')), rows => { lists.leader = rows; emit(); }));
   if (isHR()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_hr')), rows => { lists.hr = rows; emit(); }));
+  // admins can act on every stage, including other managers' pending approvals
+  if (isAdmin()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_leader')), rows => { lists.allLeader = rows; emit(); }));
   if (isFinanceUser()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_finance')), rows => { lists.fin = rows; emit(); }));
   return () => unsubs.forEach(u => u && u());
 }
@@ -89,7 +93,7 @@ function isFinanceUser() {
 /** History for managers: requests of my team (leader) or everyone (HR) in a date window */
 export function watchManaged(fromYmd, cb) {
   const f = [where('startDate', '>=', fromYmd)];
-  const q = isHR() ? query(col('requests'), ...f) : query(col('requests'), where('leaderEmail', '==', session.email), ...f);
+  const q = seesAll() ? query(col('requests'), ...f) : query(col('requests'), where('leaderEmail', '==', session.email), ...f);
   return watch(q, rows => cb(sortReq(rows)));
 }
 export function requestsInRange(from, to, email, leaderEmail) {
@@ -199,6 +203,7 @@ export async function submitRequest(input) {
     req.attachmentId = aRef.id;
   }
   await setDoc(r, req);
+  track('request.submit', { target: r.id, detail: typeLabel(type) + (req.startDate ? ` ${req.startDate}${req.endDate && req.endDate !== req.startDate ? '→' + req.endDate : ''}` : '') });
   if (req.status === 'approved') await applyApproval(r.id);
   else {
     const stage = req.status.replace('pending_', '');
@@ -214,6 +219,7 @@ export async function cancelRequest(id) {
     status: 'cancelled', updatedAt: serverTimestamp(),
     history: arrayUnion({ at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: 'cancelled', note: '' })
   });
+  track('request.cancel', { target: id, detail: typeLabel(r.type) });
 }
 
 // ---------- decide ----------
@@ -223,6 +229,7 @@ export async function decide(id, action, note = '') {
   if (!String(r.status).startsWith('pending')) throw userError('الطلب ده اتقفل بالفعل.', 'This request was already closed.');
   const stage = r.status.replace('pending_', '');
   const entry = { at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: action === 'approve' ? `approved_${stage}` : `rejected_${stage}`, note };
+  track(action === 'approve' ? 'request.approve' : 'request.reject', { target: r.email, detail: `${typeLabel(r.type)} — ${r.name || r.email}` });
   if (action === 'reject') {
     await updateDoc(doc(db, 'requests', id), { status: 'rejected', updatedAt: serverTimestamp(), history: arrayUnion(entry), decidedBy: session.email });
     await notify(r.email, L(`تم رفض طلبك: ${typeLabel(r.type)}`, `Request rejected: ${typeLabel(r.type)}`), note || '', '#/requests');
@@ -324,6 +331,7 @@ export async function applyApproval(id, entry) {
 
 /** HR: revoke an approved leave/remote/mission (returns balance, clears schedule) */
 export async function revokeRequest(id, note = '') {
+  track('request.revoke', { target: id, detail: note });
   const r0 = await read('requests', id);
   if (!r0 || r0.status !== 'approved') throw userError('الطلب مش معتمد.', 'Request is not approved.');
   const email = r0.email;

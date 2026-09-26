@@ -6,6 +6,7 @@ import { roleLabel, leaveTypes } from '../core/policy.js';
 import { auth, updateDoc, setDoc, read, serverTimestamp, ref, updatePassword, EmailAuthProvider, reauthenticateWithCredential, list, query, col, where, toMs } from '../core/fb.js';
 import { nameOf } from '../services/directory.js';
 import { getBalance, remaining } from '../services/requests.js';
+import { track } from '../services/activity.js';
 
 export function balanceTable(bal) {
   return `<div class="table-wrap"><table class="table"><thead><tr>
@@ -44,6 +45,7 @@ export default async function render(root) {
       try {
         const data = await imageToDataUrl(e.target.files[0], 240, 0.8);
         await updateDoc(ref('users', session.email), { photo: data });
+        track('profile.photo');
         toast(L('تم تحديث الصورة', 'Photo updated'));
       } catch (ex) { toastErr(ex); }
     };
@@ -75,6 +77,7 @@ export default async function render(root) {
         const cur = await read('employees_private', session.email).catch(() => null);
         await setDoc(ref('employees_private', session.email), cur ? { contactEmail: v, updatedAt: serverTimestamp() } : { email: session.email, contactEmail: v, updatedAt: serverTimestamp() }, { merge: true });
         toast(L('اتحفظ إيميل الاستعادة', 'Recovery email saved'));
+        track('profile.recovery_email', { detail: v });
       } catch (ex) { toastErr(ex); }
     });
   };
@@ -103,7 +106,7 @@ export default async function render(root) {
       if (f.p1.value.length < 8 || f.p1.value !== f.p2.value) { err.textContent = L('كلمتين المرور مش متطابقين أو قصيرين.', 'Passwords do not match or are too short.'); err.classList.remove('hidden'); return; }
       try {
         await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(session.email, f.cur.value));
-        await updatePassword(auth.currentUser, f.p1.value);
+        await updatePassword(auth.currentUser, f.p1.value); track('auth.password_change');
         m.close(); toast(L('تم تغيير كلمة المرور', 'Password changed'));
       } catch (ex) {
         err.textContent = /wrong-password|invalid-credential/.test(ex.code || '') ? L('كلمة المرور الحالية غلط.', 'Current password is incorrect.') : L('تعذّر التغيير، حاول تاني.', 'Could not change password.');

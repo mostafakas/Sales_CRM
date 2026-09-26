@@ -121,11 +121,12 @@ function forgot_(b) {
     if (!p || p.isSuspended === true) return neutral;
     const to = recoveryEmail_(user);
     if (!to) return neutral;
-    const req = { requestType: 'PASSWORD_RESET', email: user, returnOobLink: true };
-    if (b.origin && /^https:\/\//.test(b.origin)) req.continueUrl = b.origin;
-    let link;
-    try { link = identity_('accounts:sendOobCode', req).oobLink; }
-    catch (x) { delete req.continueUrl; link = identity_('accounts:sendOobCode', req).oobLink; } // origin not in Authorized domains
+    const oob = identity_('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email: user, returnOobLink: true }).oobLink;
+    // open our own "new password" page (reset.html) instead of Firebase's default page,
+    // which is blocked when the web API key is restricted to the site's domain
+    const code = oob && (String(oob).match(/[?&]oobCode=([^&#]+)/) || [])[1];
+    const site = siteUrl_();
+    const link = code && site ? site + 'reset.html?mode=resetPassword&oobCode=' + code : oob;
     if (link) sendResetLink_(to, p.name || user, user, link);
   } catch (e) { console.error('forgot', user, e && e.message); }
   return neutral;
@@ -187,9 +188,15 @@ function caller_(idToken) {
 function b64urlBytes_(s) { s = String(s).replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Utilities.base64Decode(s); }
 function b64urlJson_(s) { return JSON.parse(Utilities.newBlob(b64urlBytes_(s)).getDataAsString('UTF-8')); }
 function bytesToHex_(b) { return b.map(x => ('0' + ((x + 256) % 256).toString(16)).slice(-2)).join(''); }
+// (written with BigInt(...) calls — the Apps Script editor rejects the 1n literal syntax)
 function modPow_(base, exp, mod) {
-  let r = 1n; base %= mod;
-  while (exp > 0n) { if (exp & 1n) r = (r * base) % mod; base = (base * base) % mod; exp >>= 1n; }
+  const ZERO = BigInt(0), ONE = BigInt(1), TWO = BigInt(2);
+  let r = ONE; base = base % mod;
+  while (exp > ZERO) {
+    if (exp % TWO === ONE) r = (r * base) % mod;
+    base = (base * base) % mod;
+    exp = exp / TWO;
+  }
   return r;
 }
 function firebaseKeys_(force) {
@@ -213,6 +220,7 @@ function verifyIdToken_(token) {
   if (!claims.sub || !claims.email) throw new Error('unauthenticated:claims');
   if (Number(claims.exp) < now - 30) throw new Error('unauthenticated:expired');
   if (Number(claims.iat) > now + 300) throw new Error('unauthenticated:clock');
+  if (typeof BigInt !== 'function') throw new Error('unauthenticated:no-bigint');
   let key = firebaseKeys_()[header.kid];
   if (!key) key = firebaseKeys_(true)[header.kid];
   if (!key) throw new Error('unauthenticated:kid');
@@ -336,6 +344,12 @@ function tempPassword_() {
   for (let i = 0; i < 8; i++) s += chars[(bytes[i] + 256) % chars.length];
   return s.slice(0, 4) + '-' + s.slice(4, 8) + '#' + (10 + ((bytes[9] + 256) % 90));
 }
+/** The site address, as saved by the admin in Settings (never taken from the request, so links can't be redirected). */
+function siteUrl_() {
+  const pub = getDoc_('settings/public') || {};
+  const u = String(pub.siteUrl || '');
+  return /^https:\/\/[^\s]+$/.test(u) ? u.replace(/\/?$/, '/') : '';
+}
 function norm_(v) { return String(v || '').trim().toLowerCase(); }
 function mask_(e) { const p = String(e).split('@'); return p[0].slice(0, 2) + '•••@' + (p[1] || ''); }
 function prop_(k) { return PropertiesService.getScriptProperties().getProperty(k); }
@@ -351,7 +365,7 @@ function shell_(title, bodyHtml) {
     '<div style="padding:14px 24px;color:#8b93aa;font-size:12px;border-top:1px solid #e3e7f5">AL MASTER Technology — HR portal</div></div></div>';
 }
 function sendCredentials_(to, name, username, password, origin, isReset) {
-  const url = origin && /^https:\/\//.test(origin) ? origin : '';
+  const url = siteUrl_();
   const title = isReset ? 'Your password was reset / تم إعادة تعيين كلمة المرور' : 'Your AL MASTER account / حسابك على بوابة الماستر';
   const html = shell_(title,
     '<p>Hi ' + escHtml_(name) + ',</p>' +

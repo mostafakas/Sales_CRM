@@ -1,4 +1,4 @@
-import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, read, updateDoc, ref, serverTimestamp } from './core/fb.js';
+import { auth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, read, updateDoc, ref, serverTimestamp, addDoc, col } from './core/fb.js';
 import { L, isAr, setLang, toggleTheme, normEmail, byId } from './core/utils.js';
 import { newSessionId, logoutReasonText } from './core/session.js';
 import { publicConfig, toLogin, callService } from './services/authsvc.js';
@@ -90,6 +90,7 @@ byId('login-form').onsubmit = async (e) => {
     if (p.isSuspended) { await signOut(auth); throw Object.assign(new Error('x'), { ui: logoutReasonText('suspended') }); }
     // write the new session id BEFORE leaving the page, so other devices get signed out cleanly
     await updateDoc(ref('users', email), { sessionId: newSessionId(), lastLoginAt: serverTimestamp() });
+    await Promise.race([addDoc(col('activity'), { by: email, name: p.name || email, action: 'auth.login', target: '', detail: (navigator.userAgentData && navigator.userAgentData.platform) || (/Mobi/.test(navigator.userAgent) ? 'mobile' : 'desktop'), at: serverTimestamp() }).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
     location.replace('app.html');
   } catch (err) {
     signingIn = false; btn.disabled = false; btn.innerHTML = btnText;

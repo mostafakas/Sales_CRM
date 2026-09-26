@@ -43,6 +43,9 @@ export const perms = () => (session.profile && session.profile.permissions) || {
 export const isAdmin = () => session.role === 'admin';
 export const isHR = () => session.role === 'hr' || isAdmin();
 export const isFinance = () => session.role === 'finance' || isAdmin() || !!perms().payroll;
+export const isPM = () => session.role === 'pm';
+/** sees every employee's attendance, requests, leave and reports (read) */
+export const seesAll = () => isHR() || isPM();
 export const isLeader = () => session.role === 'leader' || session.team.length > 0;
 export const canApprove = () => isLeader() || isHR() || isFinance();
 export const hasCRM = () => !!perms().crm || isAdmin();
@@ -97,6 +100,7 @@ export async function forceLogout(reason) {
   location.replace('index.html');
 }
 export async function logout() {
+  try { const m = await import('../services/activity.js'); await Promise.race([m.track('auth.logout'), new Promise(r => setTimeout(r, 1500))]); } catch {}
   try { await signOut(auth); } catch {}
   location.replace('index.html');
 }

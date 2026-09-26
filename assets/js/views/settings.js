@@ -1,6 +1,6 @@
 // Settings: work hours, remote & permissions, leave types, holidays, workflows, payroll rules, system tools.
 import { L, esc, num, fmtDate, isAr, fmtTime } from '../core/utils.js';
-import { publicConfig, savePublicConfig, callService } from '../services/authsvc.js';
+import { publicConfig, savePublicConfig, callService, siteUrl } from '../services/authsvc.js';
 import { toast, toastErr, busy, confirmDialog, empty, loader, modal } from '../core/ui.js';
 import { isAdmin, session, now } from '../core/session.js';
 import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY } from '../core/policy.js';
@@ -158,7 +158,7 @@ export default async function render(root) {
       pf.onsubmit = (e) => { e.preventDefault(); busy(pf.querySelector('[type=submit]'), async () => {
         const url = pf.authServiceUrl.value.trim(), dom = pf.loginDomain.value.trim().replace(/^@/, '').toLowerCase();
         if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) { toast(L('الرابط لازم يكون رابط Web app من Apps Script وينتهي بـ /exec', 'The URL must be an Apps Script web-app URL ending in /exec'), '', 'bad'); return; }
-        try { await savePublicConfig({ loginDomain: dom, authServiceUrl: url }); toast(L('تم الحفظ', 'Saved')); P.system(); } catch (ex) { toastErr(ex); }
+        try { await savePublicConfig({ loginDomain: dom, authServiceUrl: url, ...(location.protocol === 'https:' ? { siteUrl: siteUrl() } : {}) }); toast(L('تم الحفظ', 'Saved')); P.system(); } catch (ex) { toastErr(ex); }
       }); };
       pane.querySelector('#svc-test').onclick = (e) => busy(e.currentTarget, async () => {
         const o = pane.querySelector('#svc-out');

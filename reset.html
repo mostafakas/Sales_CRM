@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AL MASTER | كلمة مرور جديدة</title>
+  <meta name="theme-color" content="#0a0f3d">
+  <meta name="description" content="AL MASTER — بوابة الموظفين والموارد البشرية">
+  <link rel="icon" href="assets/img/favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/img/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script>
+    (function () {
+      try {
+        var l = localStorage.getItem('am_lang') || 'ar';
+        document.documentElement.lang = l; document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+        var t = localStorage.getItem('am_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="auth">
+    <section class="auth-art" aria-hidden="true">
+      <img class="mark-bg" src="assets/img/logo-mark-white.png" alt="">
+      <img class="auth-logo" src="assets/img/logo-white.png" alt="AL MASTER">
+      <div>
+        <span class="pill"><i class="fas fa-shield-halved"></i> <span data-t="pill"></span></span>
+        <h1 class="mt-16" data-t="headline"></h1>
+        <p data-t="tagline"></p>
+      </div>
+      <div class="row gap-24" style="color:var(--on-navy-muted);font-size:13px">
+        <span><i class="fas fa-globe"></i>&nbsp; almaster.tech</span>
+      </div>
+    </section>
+    <section class="auth-form">
+      <div class="auth-top">
+        <button class="btn btn-ghost btn-icon" id="theme-btn" aria-label="Theme"><i class="fas fa-moon"></i></button>
+        <button class="btn btn-ghost btn-sm" id="lang-btn" style="font-weight:800">EN</button>
+      </div>
+      <div class="auth-card" id="card">
+        <img class="auth-mobile-logo" src="assets/img/logo-full.png" alt="AL MASTER">
+        <div id="state"><div class="spinner" style="margin:40px auto"></div></div>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="assets/js/reset.js"></script>
+</body>
+</html>

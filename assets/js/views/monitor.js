@@ -1,7 +1,7 @@
 // Live monitor: a real-time board of who is working, on a break, in a meeting, finished, not started, or away.
 import { L, esc, fmtDur, fmtTime, fmtMin, fmtHours, num, debounce, hmToMin, ymd } from '../core/utils.js';
 import { toast, toastErr, avatar, STATUS_META, empty, confirmDialog, bindActions, modal } from '../core/ui.js';
-import { session, now, isHR } from '../core/session.js';
+import { session, now, isHR, seesAll } from '../core/session.js';
 import { dayKey, planFor, lateness, modeLabel, roleLabel, isWorkingPlan, policy, leaveType } from '../core/policy.js';
 import { toMs, list, query, col, where } from '../core/fb.js';
 import { onDirectory, managedPeople, departments } from '../services/directory.js';
@@ -32,7 +32,7 @@ export default async function render(root) {
   root.innerHTML = `
     <div class="page-head">
       <div><h2>${L('المتابعة اللحظية', 'Live monitor')} <span class="live-pill"><span class="pulse"></span>${L('مباشر', 'Live')}</span></h2>
-        <p>${isHR() ? L('كل الموظفين اللي بيسجّلوا حضور — بيتحدّث لوحده.', 'Everyone who clocks in — updates on its own.') : L('فريقك — بيتحدّث لوحده.', 'Your team — updates on its own.')}</p></div>
+        <p>${seesAll() ? L('كل الموظفين اللي بيسجّلوا حضور — بيتحدّث لوحده.', 'Everyone who clocks in — updates on its own.') : L('فريقك — بيتحدّث لوحده.', 'Your team — updates on its own.')}</p></div>
       <div class="seg" id="viewseg" role="group" aria-label="${L('طريقة العرض', 'View')}">
         <button data-v="table" title="${L('جدول', 'Table')}"><i class="fas fa-table-list"></i><span>${L('جدول', 'Table')}</span></button>
         <button data-v="cards" title="${L('كروت', 'Cards')}"><i class="fas fa-grip"></i><span>${L('كروت', 'Cards')}</span></button>
@@ -41,7 +41,7 @@ export default async function render(root) {
     <section class="card mon-summary mb-16" id="summary"></section>
     <div class="filters mon-toolbar">
       <div class="search"><i class="fas fa-search"></i><input class="input" id="q" placeholder="${L('ابحث بالاسم أو المسمى', 'Search name or title')}"></div>
-      ${isHR() ? `<select class="select" id="dept"><option value="">${L('كل الأقسام', 'All departments')}</option>${departments().map(d => `<option>${esc(d)}</option>`).join('')}</select>` : ''}
+      ${seesAll() ? `<select class="select" id="dept"><option value="">${L('كل الأقسام', 'All departments')}</option>${departments().map(d => `<option>${esc(d)}</option>`).join('')}</select>` : ''}
       <div class="fchips" id="chips"></div>
     </div>
     <div id="board"></div>`;
@@ -51,7 +51,7 @@ export default async function render(root) {
   async function loadSchedules() {
     const ym = today().slice(0, 7);
     try {
-      const q = isHR() ? query(col('schedules'), where('month', '==', ym)) : query(col('schedules'), where('leaderEmail', '==', session.email), where('month', '==', ym));
+      const q = seesAll() ? query(col('schedules'), where('month', '==', ym)) : query(col('schedules'), where('leaderEmail', '==', session.email), where('month', '==', ym));
       const rows = await list(q);
       schedules = Object.fromEntries(rows.map(s => [s.email, s]));
     } catch { schedules = {}; }
@@ -155,7 +155,7 @@ export default async function render(root) {
       ${isHR() ? `<button class="btn btn-sm btn-ghost btn-icon" data-action="manage" data-email="${esc(u.email)}" title="${L('إدارة', 'Manage')}" aria-label="${L('إدارة', 'Manage')}"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
     </div>`;
   const who = (u, i) => `<div class="person"><span class="avatar-wrap">${avatar(u, 'sm')}<span class="status-dot" style="background:${STATES[i.state].color}"></span></span>
-      <div class="min0"><b class="truncate">${esc(u.name || u.email)}</b><span class="truncate">${esc(u.title || roleLabel(u.role))}${u.department && isHR() ? ` · ${esc(u.department)}` : ''}</span></div></div>`;
+      <div class="min0"><b class="truncate">${esc(u.name || u.email)}</b><span class="truncate">${esc(u.title || roleLabel(u.role))}${u.department && seesAll() ? ` · ${esc(u.department)}` : ''}</span></div></div>`;
 
   function tableHTML(rows, infos) {
     return `<div class="card"><div class="table-wrap"><table class="table mon-table"><thead><tr>
@@ -203,7 +203,7 @@ export default async function render(root) {
       .sort((a, b) => ORDER.indexOf(infos.get(a.email).state) - ORDER.indexOf(infos.get(b.email).state) || (a.name || a.email).localeCompare(b.name || b.email, 'ar'));
     const board = root.querySelector('#board');
     if (!rows.length) {
-      board.innerHTML = `<div class="card">${empty('fa-users-slash', L('مفيش حد في الفلتر ده', 'Nobody matches this filter'), !people.length && !isHR() ? L('لو فريقك فاضي، اطلب من HR يربط الموظفين بيك.', 'If your team is empty, ask HR to assign members to you.') : '')}</div>`;
+      board.innerHTML = `<div class="card">${empty('fa-users-slash', L('مفيش حد في الفلتر ده', 'Nobody matches this filter'), !people.length && !seesAll() ? L('لو فريقك فاضي، اطلب من HR يربط الموظفين بيك.', 'If your team is empty, ask HR to assign members to you.') : '')}</div>`;
       return;
     }
     const v = narrow.matches ? 'cards' : view;

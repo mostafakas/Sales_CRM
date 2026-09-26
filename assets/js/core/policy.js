@@ -76,6 +76,7 @@ export const MODE_META = {
 export const ROLE_META = {
   employee: { ar: 'موظف', en: 'Employee' },
   leader: { ar: 'مدير فريق', en: 'Team leader' },
+  pm: { ar: 'مدير المشروعات', en: 'Project manager' },
   hr: { ar: 'موارد بشرية', en: 'HR' },
   finance: { ar: 'المالية', en: 'Finance' },
   admin: { ar: 'مدير النظام', en: 'Administrator' }
@@ -112,9 +113,10 @@ export async function loadPolicy() {
   watch(ref('settings', 'leave'), d => { if (d && Array.isArray(d.types) && d.types.length) leaveTypes = d.types; subs.forEach(f => f()); });
   watch(ref('settings', 'holidays'), d => { holidays = (d && d.days) || {}; subs.forEach(f => f()); });
 }
-export async function savePolicy(part) { await setDoc(ref('settings', 'general'), { ...part, updatedAt: serverTimestamp() }, { merge: true }); }
-export async function saveLeaveTypes(types) { await setDoc(ref('settings', 'leave'), { types, updatedAt: serverTimestamp() }, { merge: true }); }
-export async function saveHolidays(days) { await setDoc(ref('settings', 'holidays'), { days, updatedAt: serverTimestamp() }); }
+const audit = (a, d) => import('../services/activity.js').then(m => m.track(a, { detail: d })).catch(() => {});
+export async function savePolicy(part) { await setDoc(ref('settings', 'general'), { ...part, updatedAt: serverTimestamp() }, { merge: true }); audit('settings.update', Object.keys(part).join(', ')); }
+export async function saveLeaveTypes(types) { await setDoc(ref('settings', 'leave'), { types, updatedAt: serverTimestamp() }, { merge: true }); audit('settings.update', 'leave types'); }
+export async function saveHolidays(days) { await setDoc(ref('settings', 'holidays'), { days, updatedAt: serverTimestamp() }); audit('settings.update', 'holidays'); }
 
 export const leaveType = (id) => leaveTypes.find(t => t.id === id) || { id, ar: id, en: id, days: 0, paid: true };
 export const leaveTypeLabel = (id) => { const t = leaveType(id); return L(t.ar, t.en); };

@@ -4,7 +4,8 @@
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
-  createUserWithEmailAndPassword, updatePassword, EmailAuthProvider, reauthenticateWithCredential
+  createUserWithEmailAndPassword, updatePassword, EmailAuthProvider, reauthenticateWithCredential,
+  verifyPasswordResetCode, confirmPasswordReset
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
   getFirestore, doc, collection, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, onSnapshot,
@@ -36,7 +37,7 @@ export function secondaryAuth() {
 
 export {
   onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword,
-  updatePassword, EmailAuthProvider, reauthenticateWithCredential,
+  updatePassword, EmailAuthProvider, reauthenticateWithCredential, verifyPasswordResetCode, confirmPasswordReset,
   doc, collection, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, onSnapshot, query, where, orderBy, limit,
   serverTimestamp, increment, arrayUnion, Timestamp, runTransaction, writeBatch, deleteField
 };

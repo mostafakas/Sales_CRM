@@ -1,7 +1,7 @@
 // Leaves & balances: who's out this month, balances per person, open a new leave year.
 import { L, esc, num, fmtMonth, addMonths, ym as ymOf, monthDates, fmtDate, isAr, weekday } from '../core/utils.js';
 import { toast, toastErr, avatar, empty, loader, busy, confirmDialog } from '../core/ui.js';
-import { now, isHR, isAdmin, session } from '../core/session.js';
+import { now, isHR, isAdmin, session, seesAll } from '../core/session.js';
 import { leaveTypes, planFor, policy, leaveTypeLabel, modeLabel } from '../core/policy.js';
 import { list, query, col, where, db, doc, writeBatch, serverTimestamp } from '../core/fb.js';
 import { managedPeople } from '../services/directory.js';
@@ -24,7 +24,7 @@ export default async function render(root) {
 
   async function loadOut() {
     root.querySelector('#ml').textContent = fmtMonth(ym);
-    const scope = isHR() ? [] : [where('leaderEmail', '==', session.email)];
+    const scope = seesAll() ? [] : [where('leaderEmail', '==', session.email)];
     const schedules = await list(query(col('schedules'), ...scope, where('month', '==', ym))).catch(() => []);
     const ppl = managedPeople();
     const days = monthDates(ym);
@@ -38,7 +38,7 @@ export default async function render(root) {
   async function loadBal() {
     const ppl = managedPeople();
     let bals;
-    if (isHR()) {
+    if (seesAll()) {
       const all = await list(query(col('balances'), where('year', '==', year))).catch(() => []);
       bals = ppl.map(p => normalizeBalance(all.find(b => b.email === p.email), p.email, year));
     } else bals = await Promise.all(ppl.map(p => getBalance(p.email, year)));

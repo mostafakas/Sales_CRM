@@ -1,6 +1,6 @@
 // Monthly calculations shared by "My attendance", monthly reports and payroll.
 import { list, query, col, where, toMs } from '../core/fb.js';
-import { session, now, isHR, isFinance } from '../core/session.js';
+import { session, now, isHR, seesAll, isFinance } from '../core/session.js';
 import { policy, planFor, lateness, earlyLeave, isWorkingPlan, lateDeductionDays, dayKey, leaveType, trackedSince } from '../core/policy.js';
 import { person } from './directory.js';
 import { monthDates, hmToMin, minutesOfDay } from '../core/utils.js';
@@ -97,7 +97,7 @@ export async function personMonth(email, ym, leaderScope) {
 
 /** Everyone I manage, one month */
 export async function teamMonth(ym, { people } = {}) {
-  const all = isHR() || isFinance();
+  const all = seesAll() || isFinance();
   const scope = all ? undefined : session.email;
   const from = `${ym}-01`, to = `${ym}-31`;
   const [days, schedules, reqs] = await Promise.all([

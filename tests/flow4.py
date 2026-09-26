@@ -97,7 +97,7 @@ a.shot('f4-settings', True)
 
 # 8) forced logout after reset + reason on sign-in page
 a.login('emp2@almaster.tech'); pg.wait_for_timeout(500)
-pg.evaluate("""() => { const fs = JSON.parse(localStorage.getItem('mockfs')); fs['users/emp2@almaster.tech'].sessionId = 'reset_1'; localStorage.setItem('mockfs', JSON.stringify(fs)); window.dispatchEvent(new StorageEvent('storage', { key: 'mockfs' })); }""")
+pg.evaluate("""() => { const fs = JSON.parse(localStorage.getItem('mockfs')); fs['users/emp2@almaster.tech'].sessionId = 'reset_1'; const v = JSON.stringify(fs); localStorage.setItem('mockfs', v); window.dispatchEvent(new StorageEvent('storage', { key: 'mockfs', newValue: v })); }""")
 pg.wait_for_timeout(800)
 if 'index.html' not in pg.url:
     pg.reload()
