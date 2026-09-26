@@ -1,5 +1,5 @@
 // Service worker: caches the app shell for fast loads; data always comes live from Firestore.
-const CACHE = 'almaster-hr-v3';
+const CACHE = 'almaster-hr-v4';
 const SHELL = ['./', './index.html', './app.html', './assets/css/app.css', './assets/img/logo-white.png', './assets/img/logo-full.png', './assets/img/logo-mark-white.png', './assets/img/icon-192.png', './manifest.json'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => {

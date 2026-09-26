@@ -3,7 +3,7 @@ import { L, esc, isAr, setLang, toggleTheme, imageToDataUrl, num, fmtDate } from
 import { toast, toastErr, avatar, busy, modal, empty } from '../core/ui.js';
 import { session, now } from '../core/session.js';
 import { roleLabel, leaveTypes } from '../core/policy.js';
-import { auth, updateDoc, ref, updatePassword, EmailAuthProvider, reauthenticateWithCredential, list, query, col, where, toMs } from '../core/fb.js';
+import { auth, updateDoc, setDoc, read, serverTimestamp, ref, updatePassword, EmailAuthProvider, reauthenticateWithCredential, list, query, col, where, toMs } from '../core/fb.js';
 import { nameOf } from '../services/directory.js';
 import { getBalance, remaining } from '../services/requests.js';
 
@@ -34,7 +34,7 @@ export default async function render(root) {
           <input type="file" accept="image/*" hidden id="photo"><span class="btn btn-sm btn-icon btn-primary" style="position:absolute;bottom:0;inset-inline-end:0;border-radius:50%"><i class="fas fa-camera"></i></span></label>
         <div><h3 style="font-size:20px">${esc(u.name || session.email)}</h3><div class="muted">${esc(u.title || '')}</div><span class="badge brand mt-8">${esc(roleLabel(u.role))}</span></div></div>
       <dl class="kv">
-        <dt>${L('الإيميل', 'Email')}</dt><dd dir="ltr" style="text-align:start">${esc(session.email)}</dd>
+        <dt>${L('اسم المستخدم', 'Username')}</dt><dd dir="ltr" style="text-align:start">${esc(session.email)}</dd>
         <dt>${L('القسم', 'Department')}</dt><dd>${esc(u.department || '—')}</dd>
         <dt>${L('المدير المباشر', 'Manager')}</dt><dd>${esc(u.leaderEmail ? nameOf(u.leaderEmail) : '—')}</dd>
         <dt>${L('تاريخ التعيين', 'Hire date')}</dt><dd>${esc(u.hireDate ? fmtDate(u.hireDate) : '—')}</dd>
@@ -59,8 +59,25 @@ export default async function render(root) {
       <div class="row between"><div><b>${L('الوضع الليلي', 'Dark mode')}</b></div><label class="switch"><input type="checkbox" id="dark" ${document.documentElement.dataset.theme === 'dark' ? 'checked' : ''}><span></span></label></div>
       <div class="row between"><div><b>${L('إشعارات المتصفح', 'Browser notifications')}</b><div class="xs muted" id="np"></div></div><button class="btn btn-sm" id="np-btn">${L('تفعيل', 'Enable')}</button></div>
       <div class="divider" style="margin:0"></div>
+      <form class="field" id="rec-form"><label>${L('إيميل الاستعادة (Outlook)', 'Recovery email (Outlook)')}</label>
+        <div class="row gap-8"><input class="input grow" type="email" dir="ltr" name="e" placeholder="name@outlook.com"><button class="btn" type="submit">${L('حفظ', 'Save')}</button></div>
+        <div class="xs muted mt-4">${L('لو نسيت كلمة المرور، لينك التغيير هيوصل هنا.', 'If you forget your password, the reset link is sent here.')}</div></form>
       <button class="btn" id="pw-btn"><i class="fas fa-key"></i> ${L('تغيير كلمة المرور', 'Change password')}</button>
     </div>`;
+  const rf = root.querySelector('#rec-form');
+  read('employees_private', session.email).then(d => { if (d && d.contactEmail) rf.e.value = d.contactEmail; }).catch(() => {});
+  rf.onsubmit = async (e) => {
+    e.preventDefault();
+    const v = rf.e.value.trim();
+    if (v && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { toast(L('الإيميل مش صحيح', 'Invalid email'), '', 'bad'); return; }
+    await busy(rf.querySelector('button'), async () => {
+      try {
+        const cur = await read('employees_private', session.email).catch(() => null);
+        await setDoc(ref('employees_private', session.email), cur ? { contactEmail: v, updatedAt: serverTimestamp() } : { email: session.email, contactEmail: v, updatedAt: serverTimestamp() }, { merge: true });
+        toast(L('اتحفظ إيميل الاستعادة', 'Recovery email saved'));
+      } catch (ex) { toastErr(ex); }
+    });
+  };
   root.querySelectorAll('[data-lang]').forEach(b => b.onclick = async () => {
     try { await updateDoc(ref('users', session.email), { lang: b.dataset.lang }); } catch {}
     setLang(b.dataset.lang);

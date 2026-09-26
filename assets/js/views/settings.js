@@ -1,5 +1,6 @@
 // Settings: work hours, remote & permissions, leave types, holidays, workflows, payroll rules, system tools.
 import { L, esc, num, fmtDate, isAr, fmtTime } from '../core/utils.js';
+import { publicConfig, savePublicConfig, callService } from '../services/authsvc.js';
 import { toast, toastErr, busy, confirmDialog, empty, loader, modal } from '../core/ui.js';
 import { isAdmin, session, now } from '../core/session.js';
 import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY } from '../core/policy.js';
@@ -135,7 +136,16 @@ export default async function render(root) {
       pane.innerHTML = loader();
       const mig = await read('settings', 'migration').catch(() => null);
       const audit = await list(query(col('audit_log'), orderBy('at', 'desc'), limit(30))).catch(() => []);
+      const pub = await publicConfig(true).catch(() => ({}));
       pane.innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+        <section class="card" style="grid-column:1/-1"><div class="card-head"><h3><i class="fas fa-key" style="color:var(--brand)"></i> ${L('الدخول وكلمات المرور', 'Sign-in & passwords')}</h3><span class="badge ${pub.authServiceUrl ? 'ok' : ''}" id="svc-badge">${pub.authServiceUrl ? L('الخدمة متوصّلة', 'Service linked') : L('الخدمة مش متفعّلة', 'Service not set up')}</span></div>
+          <form class="card-body form-grid" id="pubf">
+            <div class="field"><label>${L('دومين الدخول', 'Login domain')}</label><input class="input" name="loginDomain" dir="ltr" placeholder="almaster.local" value="${esc(pub.loginDomain || '')}">
+              <div class="xs muted mt-4">${L('لو اليوزرات شكلها ahmed@almaster.local اكتب almaster.local، والموظف يقدر يدخل بـ ahmed بس.', 'If usernames look like ahmed@almaster.local, enter almaster.local — employees can then sign in with just "ahmed".')}</div></div>
+            <div class="field"><label>${L('رابط خدمة كلمات المرور (Apps Script)', 'Password service URL (Apps Script)')}</label><input class="input" name="authServiceUrl" dir="ltr" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(pub.authServiceUrl || '')}">
+              <div class="xs muted mt-4">${L('بيشغّل «ريسيت الباسورد» و«نسيت كلمة المرور» على إيميل Outlook. خطوات التفعيل في tools/password-service/README.md.', 'Powers "Reset password" and "Forgot password" to Outlook. Setup steps: tools/password-service/README.md.')}</div></div>
+            <div class="span-2 row gap-8"><button class="btn btn-primary" type="submit"><i class="fas fa-floppy-disk"></i> ${L('حفظ', 'Save')}</button><button class="btn" type="button" id="svc-test"><i class="fas fa-plug-circle-check"></i> ${L('اختبار الاتصال', 'Test connection')}</button><span class="small" id="svc-out"></span></div>
+          </form></section>
         <section class="card"><div class="card-head"><h3>${L('ترحيل البيانات من النظام القديم', 'Migrate data from the old system')}</h3>${mig && mig.done ? `<span class="badge ok">${L('اتعمل', 'Done')}</span>` : ''}</div>
           <div class="card-body col gap-16">
             <p class="small">${L('بينقل الموظفين والرواتب (لمكان محمي) والأرصدة والطلبات القديمة والجداول وحركات الخزينة للنظام الجديد. البيانات القديمة مش بتتمسح، والتشغيل أكتر من مرة آمن.', 'Moves employees, salaries (to a protected place), balances, old requests, schedules and treasury movements. Old data is kept; re-running is safe.')}</p>
@@ -144,6 +154,20 @@ export default async function render(root) {
             <div id="mig-out"></div></div></section>
         <section class="card"><div class="card-head"><h3>${L('سجل العمليات الإدارية', 'Admin audit log')}</h3></div>
           ${audit.length ? `<div class="list">${audit.map(a => `<div class="list-item"><div class="grow"><b class="small">${esc(a.action)}</b><div class="xs muted">${esc(a.target || '')} · ${esc(a.by || '')}</div></div><span class="xs faint">${esc(fmtDate(toMs(a.at)))}</span></div>`).join('')}</div>` : `<div class="card-body">${empty('fa-list', L('مفيش عمليات', 'No entries'))}</div>`}</section></div>`;
+      const pf = pane.querySelector('#pubf');
+      pf.onsubmit = (e) => { e.preventDefault(); busy(pf.querySelector('[type=submit]'), async () => {
+        const url = pf.authServiceUrl.value.trim(), dom = pf.loginDomain.value.trim().replace(/^@/, '').toLowerCase();
+        if (url && !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) { toast(L('الرابط لازم يكون رابط Web app من Apps Script وينتهي بـ /exec', 'The URL must be an Apps Script web-app URL ending in /exec'), '', 'bad'); return; }
+        try { await savePublicConfig({ loginDomain: dom, authServiceUrl: url }); toast(L('تم الحفظ', 'Saved')); P.system(); } catch (ex) { toastErr(ex); }
+      }); };
+      pane.querySelector('#svc-test').onclick = (e) => busy(e.currentTarget, async () => {
+        const o = pane.querySelector('#svc-out');
+        try {
+          const r = await callService('ping', {}, { signedIn: false });
+          o.innerHTML = r.firebase ? `<span class="badge ok">${L('شغالة', 'Working')} · ${L('إيميلات متاحة النهارده', 'emails left today')} ${num(r.mailQuota)}</span>`
+            : `<span class="badge bad">${L('الخدمة وصلت بس مفتاح Firebase مش شغال', 'Reached, but the Firebase key is not working')}</span> <span class="xs muted" dir="ltr">${esc(r.detail || (r.configured ? '' : 'SERVICE_ACCOUNT missing'))}</span>`;
+        } catch (ex) { o.innerHTML = `<span class="badge bad">${esc(ex.userMessage || ex.message)}</span>`; }
+      });
       const out = pane.querySelector('#mig-out');
       const showReport = (r, dry) => {
         out.innerHTML = `<div class="alert ${dry ? 'info' : 'ok'}"><div><b>${dry ? L('معاينة — مفيش حاجة اتكتبت', 'Preview — nothing written') : L('تم الترحيل', 'Migration complete')}</b>

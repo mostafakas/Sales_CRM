@@ -20,6 +20,7 @@ service cloud.firestore {
     function isFinance() { return active() && (role() in ['finance', 'admin'] || prof().get('permissions', {}).get('payroll', false) == true); }
     function hasCRM() { return active() && (role() == 'admin' || prof().get('permissions', {}).get('crm', false) == true); }
     function leads(email) { return exists(uPath(email)) && get(uPath(email)).data.get('leaderEmail', '') == me(); }
+    function recoveryOk(d) { return d.get('contactEmail', '') == '' || (d.contactEmail is string && d.contactEmail.size() < 120 && d.contactEmail.matches('^[^@ ]+@[^@ ]+[.][^@ ]+$')); }
     function payrollOf(d) { return d.get('permissions', {}).get('payroll', false) == true; }
     // HR/finance may manage everyone's records except their own (admins may do both)
     function othersOnly() {
@@ -114,12 +115,18 @@ service cloud.firestore {
       allow get: if active() && email == me();
       allow read: if isHR() || isFinance();
       allow write: if (isHR() || isFinance()) && (email != me() || isAdmin());
+      // employees may set their own recovery email (used for "Forgot password?")
+      allow create: if active() && email == me() && request.resource.data.keys().hasOnly(['email', 'contactEmail', 'updatedAt'])
+        && request.resource.data.email == me() && recoveryOk(request.resource.data);
+      allow update: if active() && email == me() && onlyChanged(['contactEmail', 'updatedAt']) && recoveryOk(request.resource.data);
     }
 
     // ---------- settings ----------
     match /settings/{doc} {
+      // settings/public = login domain + password-service URL, needed on the sign-in page before login
+      allow get: if doc == 'public';
       allow read: if active();
-      allow write: if isHR();
+      allow write: if isHR() && (doc != 'public' || isAdmin());
     }
     match /_clock/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;

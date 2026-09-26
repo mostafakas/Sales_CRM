@@ -5,7 +5,7 @@ const saveUsers = (u) => localStorage.setItem(LS_USERS, JSON.stringify(u));
 const instances = new Map();
 function err(code) { const e = new Error(code); e.code = code; return e; }
 function mkUser(email, auth) {
-  const u = { uid: 'uid_' + email.replace(/[^a-z0-9]/gi, '_'), email, displayName: null };
+  const u = { uid: 'uid_' + email.replace(/[^a-z0-9]/gi, '_'), email, displayName: null, getIdToken: async () => 'mock-token-' + email };
   u._auth = auth;
   return u;
 }

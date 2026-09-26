@@ -55,7 +55,7 @@
         <form id="login-form" class="col gap-16" novalidate>
           <div class="field">
             <label for="email" data-t="email"></label>
-            <input class="input" id="email" type="email" autocomplete="username" required dir="ltr" style="height:48px">
+            <input class="input" id="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required dir="ltr" style="height:48px">
           </div>
           <div class="field">
             <div class="row between"><label for="password" data-t="password"></label><a href="#" id="forgot-link" class="small bold" data-t="forgot"></a></div>
@@ -75,7 +75,7 @@
         <h2 data-t="resetTitle"></h2>
         <p class="sub" data-t="resetSub"></p>
         <form id="reset-form" class="col gap-16" novalidate>
-          <div class="field"><label for="reset-email" data-t="email"></label><input class="input" id="reset-email" type="email" required dir="ltr" style="height:48px"></div>
+          <div class="field"><label for="reset-email" data-t="email"></label><input class="input" id="reset-email" type="text" autocapitalize="none" spellcheck="false" required dir="ltr" style="height:48px"></div>
           <div id="reset-msg" class="alert hidden" role="status"></div>
           <button class="btn btn-primary btn-lg btn-block" id="reset-btn" type="submit"><span data-t="sendLink"></span></button>
         </form>

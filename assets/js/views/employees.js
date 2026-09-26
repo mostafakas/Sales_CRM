@@ -7,6 +7,7 @@ import { secondaryAuth, createUserWithEmailAndPassword, signOut, db, doc, setDoc
 import { allPeople, onDirectory, departments, person, nameOf } from '../services/directory.js';
 import { getBalance, adjustBalance, remaining, emptyBalance, balanceId } from '../services/requests.js';
 import { personMonthView } from './attendance.js';
+import { publicConfig, toLogin, callService } from '../services/authsvc.js';
 import { balanceTable } from './profile.js';
 import { requestCard, showRequestDetails } from './request-card.js';
 
@@ -70,18 +71,29 @@ export async function openEditor(email) {
   const sal = priv.salary || {};
   const people = allPeople().filter(p => !p.isSuspended && p.email !== email);
   const deptList = departments();
+  const pcfg = await publicConfig().catch(() => ({}));
+  const domain = String(pcfg.loginDomain || '').replace(/^@/, '');
+  const year = new Date(now()).getFullYear();
+  const bal = isNew ? emptyBalance('', year) : await getBalance(email, year).catch(() => emptyBalance(email, year));
+  const selfLocked = !isNew && email === session.email && !isAdmin(); // own salary/balance/access are edited by someone else
+  const canReset = !isNew && email !== session.email && (normRole(u.role) !== 'admin' || isAdmin());
   const m = modal({
     title: isNew ? L('موظف جديد', 'New employee') : L('تعديل بيانات الموظف', 'Edit employee'), icon: isNew ? 'fa-user-plus' : 'fa-user-pen', size: 'wide',
     body: `<div class="tabs mb-16" id="et">
         <button class="tab active" data-p="basic">${L('البيانات الأساسية', 'Basic info')}</button>
         <button class="tab" data-p="job">${L('الوظيفة والفريق', 'Job & team')}</button>
+        <button class="tab" data-p="leave">${L('الإجازات والأونلاين', 'Leave & remote')}</button>
         <button class="tab" data-p="pay">${L('الراتب والبنك', 'Salary & bank')}</button>
         <button class="tab" data-p="access">${L('الصلاحيات', 'Access')}</button></div>
       <form id="ef" autocomplete="off">
         <div data-pane="basic" class="form-grid">
           <div class="field span-2 row gap-16"><label style="cursor:pointer">${avatar(u, 'lg')}<input type="file" accept="image/*" hidden id="ph"></label><div class="xs muted">${L('اضغط على الصورة لتغييرها', 'Click the photo to change it')}</div></div>
           <div class="field"><label>${L('الاسم بالكامل', 'Full name')} *</label><input class="input" name="name" required value="${esc(u.name || '')}"></div>
-          <div class="field"><label>${L('الإيميل (للدخول)', 'Email (login)')} *</label><input class="input" name="email" type="email" dir="ltr" required value="${esc(email || '')}" ${isNew ? '' : 'disabled'}></div>
+          <div class="field"><label>${L('اسم المستخدم (للدخول)', 'Username (sign-in)')} *</label>
+            ${isNew ? `<input class="input" name="email" dir="ltr" required autocapitalize="none" spellcheck="false" placeholder="${domain ? 'ahmed' : 'ahmed@company.com'}"><div class="xs muted mt-4" id="uhint">${domain ? L(`هيدخل بـ «الاسم» أو «الاسم@${domain}»`, `Signs in with "name" or "name@${domain}"`) : ''}</div>`
+                    : `<input class="input" dir="ltr" value="${esc(email)}" disabled><div class="xs muted mt-4"><i class="fas fa-lock"></i> ${L('ثابت ومش بيتغير', 'Fixed — never changes')}</div>`}</div>
+          <div class="field"><label>${L('إيميل الاستعادة (Outlook)', 'Recovery email (Outlook)')}</label><input class="input" name="contactEmail" type="email" dir="ltr" value="${esc(priv.contactEmail || '')}" placeholder="name@outlook.com" ${selfLocked ? 'disabled' : ''}>
+            <div class="xs muted mt-4">${selfLocked ? L('غيّره من «حسابي».', 'Change it from "My profile".') : L('عليه بيوصل لينك «نسيت كلمة المرور» وكلمات المرور المؤقتة.', '"Forgot password" links and temporary passwords go here.')}</div></div>
           <div class="field"><label>${L('الموبايل', 'Mobile')}</label><input class="input" name="phone" dir="ltr" value="${esc(priv.phone || '')}"></div>
           <div class="field"><label>${L('النوع', 'Gender')}</label><select class="select" name="gender"><option value="male" ${u.gender !== 'female' ? 'selected' : ''}>${L('ذكر', 'Male')}</option><option value="female" ${u.gender === 'female' ? 'selected' : ''}>${L('أنثى', 'Female')}</option></select></div>
           <div class="field"><label>${L('تاريخ التعيين', 'Hire date')}</label><input class="input" type="date" name="hireDate" value="${esc(u.hireDate || '')}"></div>
@@ -92,9 +104,27 @@ export async function openEditor(email) {
           <div class="field"><label>${L('القسم', 'Department')}</label><input class="input" name="department" list="dl-dept" value="${esc(u.department || '')}"><datalist id="dl-dept">${deptList.map(d => `<option value="${esc(d)}">`).join('')}</datalist></div>
           <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role" ${!isNew && email === session.email && !isAdmin() ? 'disabled' : ''}>${Object.keys(ROLE_META).filter(r => isAdmin() || r === normRole(u.role) || !['admin', 'finance'].includes(r)).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('المدير المباشر', 'Direct manager')}</label><select class="select" name="leaderEmail"><option value="">${L('بدون (يروح لـ HR)', 'None (goes to HR)')}</option>${people.map(p => `<option value="${esc(p.email)}" ${u.leaderEmail === p.email ? 'selected' : ''}>${esc(p.name || p.email)} — ${esc(roleLabel(p.role))}</option>`).join('')}</select></div>
-          <div class="field"><label>${L('حصة الأونلاين الشهرية (أيام)', 'Monthly remote quota (days)')}</label><input class="input num" type="number" min="0" max="31" name="remoteQuota" value="${esc(u.remoteQuota ?? policy.defaultRemoteQuota)}"></div>
           <div class="row between span-2"><div><b>${L('يسجّل حضور وانصراف', 'Tracks attendance')}</b><div class="xs muted">${L('اقفلها للإدارة العليا أو اللي مش مطلوب منهم تسجيل — مش هيتحسب عليهم غياب ولا هيظهروا في تقارير الحضور.', 'Turn off for executives or anyone not required to clock in — no absence, not in attendance reports.')}</div></div><label class="switch"><input type="checkbox" name="trackAttendance" ${u.trackAttendance !== false ? 'checked' : ''}><span></span></label></div>
           <div class="field span-2" id="team-box"></div>
+        </div>
+        <div data-pane="leave" class="col gap-16 hidden">
+          <div class="form-grid">
+            <div class="field"><label>${L('أيام الأونلاين في الشهر', 'Remote days per month')}</label><input class="input num" type="number" min="0" max="31" name="remoteQuota" value="${esc(u.remoteQuota ?? policy.defaultRemoteQuota)}">
+              <div class="xs muted mt-4">${L('عدد الأيام اللي يقدر يطلب فيها شغل أونلاين كل شهر. 0 = مفيش أونلاين.', 'How many days a month they may request remote work. 0 = no remote.')}</div></div>
+          </div>
+          <div>
+            <div class="row between mb-8"><b>${L(`رصيد الإجازات ${year}`, `Leave balance ${year}`)}</b><span class="xs muted">${L('«المستخدم» بيتحسب من الطلبات المعتمدة', '"Used" comes from approved requests')}</span></div>
+            <div class="table-wrap" style="border:1px solid var(--border);border-radius:12px"><table class="table bal-edit"><thead><tr>
+              <th>${L('النوع', 'Type')}</th><th>${L('المستحق في السنة', 'Entitled / year')}</th><th class="num">${L('المستخدم', 'Used')}</th><th>${L('المتبقي دلوقتي', 'Remaining now')}</th></tr></thead>
+              <tbody>${leaveTypes.map(t => { const b = bal.types[t.id] || { entitled: 0, used: 0, adjust: 0 }; return t.unlimited
+                ? `<tr><td><b>${esc(L(t.ar, t.en))}</b></td><td colspan="3" class="muted small">${L('غير محدود', 'Unlimited')} · ${L('مستخدم', 'used')} <span class="num">${num(b.used || 0)}</span></td></tr>`
+                : `<tr data-lt="${esc(t.id)}"><td><b>${esc(L(t.ar, t.en))}</b></td>
+                    <td><input class="input num" type="number" step="0.5" min="0" data-ent value="${esc(b.entitled ?? 0)}" ${selfLocked ? 'disabled' : ''}></td>
+                    <td class="num">${num(b.used || 0)}</td>
+                    <td><input class="input num" type="number" step="0.5" data-rem value="${esc(remaining(b))}" ${selfLocked ? 'disabled' : ''}></td></tr>`; }).join('')}</tbody></table></div>
+            ${selfLocked ? `<p class="xs muted mt-8"><i class="fas fa-lock"></i> ${L('رصيدك بيعدّله HR تاني أو الأدمن.', 'Your own balance is edited by another HR member or an admin.')}</p>`
+              : `<div class="field mt-8"><label>${L('سبب تعديل الرصيد (بيتسجل في السجل)', 'Reason for the balance change (logged)')}</label><input class="input" name="balNote" placeholder="${L('مثلاً: رصيد افتتاحي', 'e.g. opening balance')}"></div>`}
+          </div>
         </div>
         <div data-pane="pay" class="form-grid hidden">
           <div class="field"><label>${L('الراتب الأساسي (شهري)', 'Basic salary (monthly)')}</label><input class="input num" type="number" min="0" name="basic" value="${esc(sal.basic ?? '')}"></div>
@@ -105,6 +135,10 @@ export async function openEditor(email) {
           <p class="span-2 xs muted"><i class="fas fa-lock"></i> ${L('بيانات الراتب والبنك محفوظة في مكان منفصل ومحدش يشوفها غير الموظف نفسه وHR والمالية.', 'Salary and bank data are stored separately — visible only to the employee, HR and finance.')}</p>
         </div>
         <div data-pane="access" class="col gap-16 hidden">
+          ${canReset ? `<div class="pw-box"><div class="row gap-12"><span class="icon-tile"><i class="fas fa-key"></i></span><div class="grow"><b>${L('كلمة المرور', 'Password')}</b>
+              <div class="xs muted">${L('بيعمل كلمة مرور مؤقتة، والموظف لازم يختار كلمة جديدة أول ما يدخل. بيخرج من كل الأجهزة.', 'Creates a temporary password; they must choose a new one at sign-in. Signs them out everywhere.')}</div></div></div>
+              <div class="row-wrap gap-12 mt-12"><button type="button" class="btn btn-soft" id="rp"><i class="fas fa-key"></i> ${L('ريسيت الباسورد', 'Reset password')}</button>
+              <label class="check"><input type="checkbox" id="rp-mail" ${priv.contactEmail ? 'checked' : ''}> ${L('وابعته على إيميل الاستعادة كمان', 'Also email it to the recovery email')}</label></div></div><div class="divider"></div>` : ''}
           <div class="row between"><div><b>${L('صلاحية الـ CRM', 'CRM access')}</b><div class="xs muted">${L('فتح تطبيق المبيعات', 'Open the sales app')}</div></div><label class="switch"><input type="checkbox" name="crm" ${u.permissions && u.permissions.crm ? 'checked' : ''}><span></span></label></div>
           <div class="field"><label>${L('دوره في الـ CRM', 'CRM role')}</label><select class="select" name="crmRole">${['agent', 'supervisor', 'admin'].map(r => `<option value="${r}" ${((u.permissions && u.permissions.crmRole) || 'agent') === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
           <div class="row between"><div><b>${L('صلاحية الرواتب والخزينة', 'Payroll & treasury access')}</b><div class="xs muted">${L('لموظفي المالية', 'For finance staff')}</div></div><label class="switch"><input type="checkbox" name="payroll" ${u.permissions && u.permissions.payroll ? 'checked' : ''} ${isAdmin() ? '' : 'disabled'}><span></span></label></div>
@@ -136,12 +170,51 @@ export async function openEditor(email) {
     teamBox.innerHTML = `<label>${L('أعضاء الفريق', 'Team members')}</label><div class="grid g-2" style="gap:6px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">${cands.map(p => `<label class="check"><input type="checkbox" data-member="${esc(p.email)}" ${p.leaderEmail === email ? 'checked' : ''}> ${esc(p.name || p.email)}</label>`).join('')}</div>`;
   };
   f.role.onchange = drawTeam; drawTeam();
+  // live balance: changing the entitlement moves "remaining" by the same amount
+  m.$$('tr[data-lt] [data-ent]').forEach(inp => {
+    let prev = Number(inp.value || 0);
+    inp.oninput = () => { const rem = inp.closest('tr').querySelector('[data-rem]'); const v = Number(inp.value || 0); rem.value = Math.round((Number(rem.value || 0) + v - prev) * 2) / 2; prev = v; };
+  });
+  const uh = m.$('#uhint');
+  if (uh && domain) f.email.oninput = () => { const v = toLogin(f.email.value, domain); uh.innerHTML = v ? `${L('اسم الدخول:', 'Sign-in name:')} <b dir="ltr">${esc(v)}</b>` : ''; };
+  const rp = m.$('#rp');
+  if (rp) rp.onclick = async () => {
+    const notify = !!(m.$('#rp-mail') && m.$('#rp-mail').checked);
+    const ok = await confirmDialog({ title: L('ريسيت الباسورد', 'Reset password'), message: L(`هيتعمل لـ ${u.name || email} كلمة مرور مؤقتة، وهيخرج من كل الأجهزة. تكمّل؟`, `${u.name || email} will get a temporary password and be signed out everywhere. Continue?`), okText: L('ريسيت', 'Reset') });
+    if (!ok) return;
+    await busy(rp, async () => {
+      try {
+        const r = await callService('reset', { target: email, notify });
+        await setDoc(doc(col('audit_log')), { action: 'user.password_reset', target: email, by: session.email, at: serverTimestamp(), emailed: !!r.emailed });
+        const pm = modal({
+          title: L('كلمة المرور المؤقتة', 'Temporary password'), icon: 'fa-key', size: 'narrow',
+          body: `<dl class="kv"><dt>${L('اسم المستخدم', 'Username')}</dt><dd dir="ltr" class="num">${esc(email)}</dd><dt>${L('كلمة المرور المؤقتة', 'Temporary password')}</dt><dd dir="ltr" class="num" style="font-size:18px;font-weight:800">${esc(r.password)}</dd></dl>
+            ${r.emailed ? `<div class="alert ok mt-16"><i class="fas fa-envelope-circle-check"></i><div>${L('اتبعتت كمان على', 'Also emailed to')} <b dir="ltr">${esc(r.emailed)}</b></div></div>` : (notify ? `<div class="alert warn mt-16">${L('ما اتبعتتش بالإيميل لأن الموظف ملوش إيميل استعادة.', 'Not emailed — the employee has no recovery email.')}</div>` : '')}
+            <p class="xs muted mt-16">${L('أول ما يدخل بيها هيظهرله شباك يختار فيه كلمة مرور جديدة. كلمة المرور دي مش متخزنة ومش هتظهر تاني.', 'On sign-in they will be asked to choose a new password. This password is not stored and will not be shown again.')}</p>`,
+          foot: `<button class="btn" id="cp2"><i class="fas fa-copy"></i> ${L('نسخ', 'Copy')}</button><button class="btn btn-primary" data-close>${L('تمام', 'Done')}</button>`
+        });
+        pm.$('#cp2').onclick = async () => { try { await navigator.clipboard.writeText(`${email}\n${r.password}\n${location.origin + location.pathname.replace(/app\.html.*$/, '')}`); toast(L('اتنسخ', 'Copied')); } catch {} };
+      } catch (ex) { toastErr(ex); }
+    });
+  };
 
   m.$('#save').onclick = (e) => busy(e.currentTarget, async () => {
     const err = m.$('#ee'); err.classList.add('hidden');
     const val = (n) => (f[n] ? f[n].value.trim() : '');
-    const newEmail = isNew ? normEmail(val('email')) : email;
-    if (!val('name') || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)) { err.textContent = L('الاسم والإيميل مطلوبين والإيميل لازم يكون صحيح.', 'Name and a valid email are required.'); err.classList.remove('hidden'); return; }
+    const newEmail = isNew ? toLogin(val('email'), domain) : email;
+    const fail = (msg) => { err.textContent = msg; err.classList.remove('hidden'); };
+    if (!val('name') || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)) return fail(domain ? L('الاسم واسم المستخدم مطلوبين.', 'Name and username are required.') : L('الاسم مطلوب، واسم المستخدم لازم يكون بالشكل name@company.com (أو حدد دومين الدخول من الإعدادات ← النظام).', 'Name is required and the username must look like name@company.com (or set a login domain in Settings → System).'));
+    const contactEmail = val('contactEmail');
+    if (contactEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contactEmail)) return fail(L('إيميل الاستعادة مش صحيح.', 'The recovery email is not valid.'));
+    // balance edits
+    const balEdits = [];
+    m.$$('tr[data-lt]').forEach(tr => {
+      const id = tr.dataset.lt; const t = bal.types[id] || { entitled: 0, used: 0, adjust: 0 };
+      const ent = Number(tr.querySelector('[data-ent]').value || 0), rem = Number(tr.querySelector('[data-rem]').value || 0);
+      const delta = Math.round((rem - (ent + (Number(t.adjust) || 0) - (Number(t.used) || 0))) * 2) / 2;
+      if (ent !== Number(t.entitled || 0) || delta !== 0) balEdits.push({ id, ent, delta });
+    });
+    if (!selfLocked && !isNew && balEdits.length && !val('balNote')) { m.$$('#et .tab').find(x => x.dataset.p === 'leave').click(); f.balNote.focus(); return fail(L('اكتب سبب تعديل الرصيد.', 'Enter a reason for the balance change.')); }
     if (val('leaderEmail') === newEmail) { err.textContent = L('الموظف مينفعش يكون مدير نفسه.', 'An employee cannot manage themselves.'); err.classList.remove('hidden'); return; }
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
@@ -153,7 +226,7 @@ export async function openEditor(email) {
     if (!isNew && !(email === session.email && !isAdmin())) pub.isSuspended = !!(f.isSuspended && f.isSuspended.checked);
     const allowances = [...allowBox.children].map(r => ({ name: r.querySelector('[data-an]').value.trim(), amount: Number(r.querySelector('[data-aa]').value || 0) })).filter(a => a.name || a.amount);
     const privData = {
-      email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value,
+      email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value, contactEmail,
       salary: { basic: Number(val('basic') || 0), fixedDeductions: Number(val('fixedDeductions') || 0), allowances }, updatedAt: serverTimestamp()
     };
     try {
@@ -171,8 +244,9 @@ export async function openEditor(email) {
         const b = writeBatch(db);
         b.set(doc(db, 'users', newEmail), { ...pub, isSuspended: false, status: 'Offline', timeBank: { Online: 0, Break: 0, Meeting: 0 }, dayKey: '', checkedOut: true, mustChangePassword: !!pw, createdAt: serverTimestamp(), createdBy: session.email });
         b.set(doc(db, 'employees_private', newEmail), privData);
-        const year = new Date(now()).getFullYear();
-        b.set(doc(db, 'balances', balanceId(newEmail, year)), { ...emptyBalance(newEmail, year), updatedAt: serverTimestamp() });
+        const nb = emptyBalance(newEmail, year);
+        balEdits.forEach(({ id, ent, delta }) => { nb.types[id] = { ...(nb.types[id] || { used: 0, adjust: 0 }), entitled: ent, adjust: delta }; });
+        b.set(doc(db, 'balances', balanceId(newEmail, year)), { ...nb, updatedAt: serverTimestamp() });
         b.set(doc(col('audit_log')), { action: 'user.create', target: newEmail, by: session.email, at: serverTimestamp() });
         await b.commit();
         m.close();
@@ -187,10 +261,12 @@ export async function openEditor(email) {
         const cm = modal({
           title: L('تم إنشاء الحساب', 'Account created'), icon: 'fa-circle-check', size: 'narrow',
           body: `<p class="mb-16">${L('ابعت البيانات دي للموظف. هيُطلب منه يغيّر كلمة المرور أول ما يدخل.', 'Send these to the employee. They must change the password at first sign-in.')}</p>
-            <dl class="kv"><dt>${L('الإيميل', 'Email')}</dt><dd dir="ltr" class="num">${esc(newEmail)}</dd><dt>${L('كلمة المرور المؤقتة', 'Temporary password')}</dt><dd dir="ltr" class="num" style="font-size:16px">${esc(pw)}</dd><dt>${L('الرابط', 'Link')}</dt><dd dir="ltr" class="xs">${esc(location.origin + location.pathname.replace(/app\.html.*$/, ''))}</dd></dl>
+            <dl class="kv"><dt>${L('اسم المستخدم', 'Username')}</dt><dd dir="ltr" class="num">${esc(newEmail)}</dd><dt>${L('كلمة المرور المؤقتة', 'Temporary password')}</dt><dd dir="ltr" class="num" style="font-size:16px">${esc(pw)}</dd><dt>${L('الرابط', 'Link')}</dt><dd dir="ltr" class="xs">${esc(location.origin + location.pathname.replace(/app\.html.*$/, ''))}</dd></dl>
             <p class="xs muted mt-16"><i class="fas fa-eye-slash"></i> ${L('كلمة المرور دي مش متخزنة في أي مكان ومش هتظهر تاني.', 'This password is not stored anywhere and will not be shown again.')}</p>`,
-          foot: `<button class="btn" id="cp"><i class="fas fa-copy"></i> ${L('نسخ', 'Copy')}</button><button class="btn btn-primary" data-close>${L('تمام', 'Done')}</button>`
+          foot: `${contactEmail && pcfg.authServiceUrl ? `<button class="btn" id="mailc"><i class="fas fa-envelope"></i> ${L('ابعتها على إيميله', 'Email them')}</button>` : ''}<button class="btn" id="cp"><i class="fas fa-copy"></i> ${L('نسخ', 'Copy')}</button><button class="btn btn-primary" data-close>${L('تمام', 'Done')}</button>`
         });
+        const mb = cm.$('#mailc');
+        if (mb) mb.onclick = (ev) => busy(ev.currentTarget, async () => { try { const r = await callService('welcome', { target: newEmail, password: pw }); toast(L('اتبعتت', 'Sent'), r.emailed); mb.disabled = true; } catch (ex) { toastErr(ex); } });
         cm.$('#cp').onclick = async () => { try { await navigator.clipboard.writeText(`${newEmail}\n${pw}\n${location.origin + location.pathname.replace(/app\.html.*$/, '')}`); toast(L('اتنسخ', 'Copied')); } catch {} };
       } else {
         const b = writeBatch(db);
@@ -206,6 +282,7 @@ export async function openEditor(email) {
         }
         b.set(doc(col('audit_log')), { action: 'user.update', target: email, by: session.email, at: serverTimestamp(), suspended: !!pub.isSuspended });
         await b.commit();
+        if (!selfLocked) for (const x of balEdits) await adjustBalance(email, year, x.id, { entitled: x.ent, adjustDelta: x.delta, note: val('balNote') });
         m.close();
         toast(L('تم حفظ التعديلات', 'Changes saved'));
       }

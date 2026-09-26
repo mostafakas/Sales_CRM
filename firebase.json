@@ -2,7 +2,7 @@
   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
   "hosting": {
     "public": ".",
-    "ignore": ["firebase.json", "firestore.rules", "firestore.indexes.json", "README.md", "CHANGELOG.md", "tests/**", "docs/**", "**/.*"],
+    "ignore": ["firebase.json", "firestore.rules", "firestore.indexes.json", "README.md", "CHANGELOG.md", "tests/**", "tools/**", "docs/**", "**/.*"],
     "headers": [
       { "source": "**/*.@(js|css)", "headers": [ { "key": "Cache-Control", "value": "public, max-age=300" } ] },
       { "source": "**", "headers": [ { "key": "X-Content-Type-Options", "value": "nosniff" }, { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }, { "key": "X-Frame-Options", "value": "DENY" } ] }

@@ -72,6 +72,7 @@ export function requireSession({ onProfileChange } = {}) {
         watch(ref('users', session.email), (d) => {
           if (!d) return;
           if (d.isSuspended) { forceLogout('suspended'); return; }
+          if (d.sessionId && String(d.sessionId).startsWith('reset_') && d.sessionId !== localSessionId()) { forceLogout('password-reset'); return; }
           if (policy.singleSession !== false && d.sessionId && localSessionId() && d.sessionId !== localSessionId()) { forceLogout('other-device'); return; }
           applyProfile(d);
           onProfileChange && onProfileChange(d);
@@ -98,5 +99,6 @@ export async function logout() {
 export const logoutReasonText = (r) => ({
   'suspended': L('الحساب ده موقوف. تواصل مع الموارد البشرية.', 'This account is suspended. Please contact HR.'),
   'other-device': L('تم تسجيل الدخول بحسابك من جهاز تاني، فاتقفلت الجلسة هنا.', 'Your account signed in on another device, so this session was closed.'),
+  'password-reset': L('الموارد البشرية عملت كلمة مرور مؤقتة لحسابك. ادخل بيها وهيُطلب منك تختار كلمة مرور جديدة.', 'HR set a temporary password for your account. Sign in with it and you will be asked to choose a new one.'),
   'no-profile': L('الحساب ده لسه ما اتفعّلش. تواصل مع الموارد البشرية.', 'This account is not activated yet. Please contact HR.')
 }[r] || '');
