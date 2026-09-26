@@ -654,3 +654,8 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
   .chat-bubble { max-width: 86%; }
 }
 .chat-conv, .chat-conv:hover, .chat-conv * { text-decoration: none !important; }
+.chat-pop.ok { border-inline-start-color: var(--ok); }
+.chat-pop.bad { border-inline-start-color: var(--bad); }
+.chat-pop.warn { border-inline-start-color: var(--warn); }
+.chat-pop.info { border-inline-start-color: var(--info); }
+.bn-badge { position: absolute; top: 2px; inset-inline-end: calc(50% - 22px); min-width: 17px; height: 17px; font-size: 10px; }

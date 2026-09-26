@@ -1,5 +1,5 @@
 // Direct messages between employees: conversations, messages, files (stored in Firestore chunks), admin archive.
-import { db, doc, col, read, list, watch, query, where, orderBy, limit, writeBatch, setDoc, updateDoc, serverTimestamp, increment, toMs } from '../core/fb.js';
+import { db, doc, col, read, list, watch, query, where, orderBy, limit, writeBatch, setDoc, updateDoc, serverTimestamp, increment, toMs, settle } from '../core/fb.js';
 import { session, isAdmin } from '../core/session.js';
 import { userError } from '../core/ui.js';
 import { imageToDataUrl } from '../core/utils.js';
@@ -41,7 +41,7 @@ async function post(chat, msg, preview) {
     lastMessage: { by: session.email, text: preview.slice(0, 140), type: msg.type || 'text', at: serverTimestamp() },
     updatedAt: serverTimestamp(), [`unread.${ek(other)}`]: increment(1), [`unread.${ek(session.email)}`]: 0
   });
-  await b.commit();
+  await settle(b.commit(), 6000);
   return m.id;
 }
 export function sendText(chat, text) {
@@ -96,11 +96,26 @@ export async function loadFile(meta) {
   return url;
 }
 
-/** Mark a conversation read for me */
+/**
+ * Mark a conversation read for me — only when there is actually something new from the other person.
+ * (Writing on every snapshot would loop: our own pending write shows lastRead as null, which triggered
+ * another write, flooding the conversation document and delaying real messages.)
+ */
+const reading = new Set();
 export async function markRead(chat) {
   if (!chat || !(chat.members || []).includes(session.email)) return;
-  if (!unreadOf(chat) && chat.lastRead && chat.lastRead[ek(session.email)] && toMs(chat.lastRead[ek(session.email)]) >= (toMs(chat.updatedAt) || 0)) return;
-  try { await updateDoc(doc(db, 'chats', chat.id), { [`unread.${ek(session.email)}`]: 0, [`lastRead.${ek(session.email)}`]: serverTimestamp() }); } catch (e) { console.warn('markRead', e && e.message); }
+  const me = ek(session.email);
+  const lr = chat.lastRead || {};
+  if (me in lr && lr[me] == null) return;                      // our own write is still on its way
+  const lm = chat.lastMessage;
+  const incomingAt = lm && lm.by !== session.email ? (toMs(lm.at) || Infinity) : 0;
+  const readAt = toMs(lr[me]) || 0;
+  if (!unreadOf(chat) && (!incomingAt || readAt >= incomingAt)) return;
+  if (reading.has(chat.id)) return;
+  reading.add(chat.id);
+  try { await settle(updateDoc(doc(db, 'chats', chat.id), { [`unread.${me}`]: 0, [`lastRead.${me}`]: serverTimestamp() }), 4000); }
+  catch (e) { console.warn('markRead', e && e.message); }
+  finally { setTimeout(() => reading.delete(chat.id), 1200); }
 }
 
 /** Admin: move every message of a conversation into the admin-only archive */

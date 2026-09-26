@@ -1,9 +1,9 @@
 // Attendance engine: start day, status changes, end day, and closing days people forgot to end.
 // Live state lives on users/{email}; each work day is archived in attendance_days/{email}_{date}.
 import {
-  db, doc, col, writeBatch, serverTimestamp, toMs, read, list, query, where, addDoc, getDoc, setDoc
+  db, doc, col, writeBatch, serverTimestamp, toMs, read, list, query, where, addDoc, getDoc, setDoc, listF
 } from '../core/fb.js';
-import { session, now, isHR } from '../core/session.js';
+import { session, now, isHR, seesAll, isFinance } from '../core/session.js';
 import { policy, dayKey, planFor } from '../core/policy.js';
 import { cairoMs, addDays, L } from '../core/utils.js';
 
@@ -151,17 +151,17 @@ export async function correctDay(email, date, { checkInMs, checkOutMs, mode, wor
 
 /** Days of one person in a month */
 export function monthDays(email, ymStr, leaderEmail) {
-  const f = [where('email', '==', email), where('date', '>=', `${ymStr}-01`), where('date', '<=', `${ymStr}-31`)];
-  if (leaderEmail) f.splice(1, 0, where('leaderEmail', '==', leaderEmail));
-  return list(query(col('attendance_days'), ...f));
+  const f = [['email', '==', email], ['date', '>=', `${ymStr}-01`], ['date', '<=', `${ymStr}-31`]];
+  if (leaderEmail) f.splice(1, 0, ['leaderEmail', '==', leaderEmail]);
+  return listF('attendance_days', f);
 }
 /** leaderEmail filter needed when a leader (not HR) reads someone else's data */
-export const scopeFor = (email) => (email === session.email || isHR()) ? undefined : session.email;
+export const scopeFor = (email) => (email === session.email || seesAll() || isFinance()) ? undefined : session.email;
 /** Days of everyone for a date range */
 export function rangeDays(from, to, leaderEmail) {
-  const f = [where('date', '>=', from), where('date', '<=', to)];
-  if (leaderEmail) f.unshift(where('leaderEmail', '==', leaderEmail));
-  return list(query(col('attendance_days'), ...f));
+  const f = [['date', '>=', from], ['date', '<=', to]];
+  if (leaderEmail) f.unshift(['leaderEmail', '==', leaderEmail]);
+  return listF('attendance_days', f);
 }
 export function dayLogs(email, key, leaderEmail) {
   const f = [where('user', '==', email), where('dayKey', '==', key)];

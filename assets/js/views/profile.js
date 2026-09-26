@@ -7,6 +7,7 @@ import { auth, updateDoc, setDoc, read, serverTimestamp, ref, updatePassword, Em
 import { nameOf } from '../services/directory.js';
 import { getBalance, remaining } from '../services/requests.js';
 import { track } from '../services/activity.js';
+import { soundsOn, setSounds, play } from '../core/sounds.js';
 
 export function balanceTable(bal) {
   return `<div class="table-wrap"><table class="table"><thead><tr>
@@ -59,6 +60,7 @@ export default async function render(root) {
       <div class="row between"><div><b>${L('اللغة', 'Language')}</b><div class="xs muted">${L('عربي أو إنجليزي', 'Arabic or English')}</div></div>
         <div class="tabs"><button class="tab ${isAr ? 'active' : ''}" data-lang="ar">عربي</button><button class="tab ${!isAr ? 'active' : ''}" data-lang="en">English</button></div></div>
       <div class="row between"><div><b>${L('الوضع الليلي', 'Dark mode')}</b></div><label class="switch"><input type="checkbox" id="dark" ${document.documentElement.dataset.theme === 'dark' ? 'checked' : ''}><span></span></label></div>
+      <div class="row between"><div><b>${L('أصوات التنبيهات', 'Alert sounds')}</b><div class="xs muted">${L('رسايل الشات والطلبات والموافقات', 'Chat messages, requests and decisions')}</div></div><label class="switch"><input type="checkbox" id="snd" ${soundsOn() ? 'checked' : ''}><span></span></label></div>
       <div class="row between"><div><b>${L('إشعارات المتصفح', 'Browser notifications')}</b><div class="xs muted" id="np"></div></div><button class="btn btn-sm" id="np-btn">${L('تفعيل', 'Enable')}</button></div>
       <div class="divider" style="margin:0"></div>
       <form class="field" id="rec-form"><label>${L('إيميل الاستعادة (Outlook)', 'Recovery email (Outlook)')}</label>
@@ -89,6 +91,7 @@ export default async function render(root) {
   const np = root.querySelector('#np');
   const npState = () => { np.textContent = !('Notification' in window) ? L('غير مدعومة', 'Not supported') : ({ granted: L('مفعّلة', 'Enabled'), denied: L('مقفولة من المتصفح', 'Blocked in browser'), default: L('مش مفعّلة', 'Not enabled') })[Notification.permission]; };
   npState();
+  root.querySelector('#snd').onchange = (e) => { setSounds(e.target.checked); if (e.target.checked) play('receive'); };
   root.querySelector('#np-btn').onclick = async () => { try { await Notification.requestPermission(); } catch {} npState(); };
   root.querySelector('#pw-btn').onclick = () => {
     const m = modal({

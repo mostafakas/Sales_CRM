@@ -4,6 +4,7 @@ import { modal, toast, toastErr, busy } from '../core/ui.js';
 import { REQUEST_TYPES, leaveTypes, policy, typeLabel } from '../core/policy.js';
 import { session, now } from '../core/session.js';
 import { submitRequest, getBalance, remaining, countWorkingDays } from '../services/requests.js';
+import { play } from '../core/sounds.js';
 
 export function openRequestForm(type = 'leave', preset = {}) {
   const today = ymd(now());
@@ -112,6 +113,7 @@ export function openRequestForm(type = 'leave', preset = {}) {
     if (attachment) { data.attachmentData = attachment.data; data.attachmentName = attachment.name; }
     try {
       await submitRequest(data);
+      play('submit');
       m.close();
       toast(L('تم إرسال الطلب', 'Request submitted'), L('هيوصلك إشعار أول ما يتاخد قرار.', "You'll be notified when it's decided."));
     } catch (ex) {

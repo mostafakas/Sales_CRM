@@ -90,7 +90,7 @@ export async function setRunStatus(month, status) {
   b.set(doc(db, 'payroll_runs', month), { status, [`${status}At`]: serverTimestamp(), [`${status}By`]: session.email, totalNet: r2(items.reduce((s, i) => s + (i.net || 0), 0)), count: items.length }, { merge: true });
   items.forEach(i => b.update(doc(db, 'payroll_items', i.id), { published: status !== 'draft' }));
   await b.commit();
-  if (status === 'approved') await Promise.all(items.map(i => notify(i.email, `قسيمة راتب ${fmtMonth(month)} جاهزة`, '', '#/payslips')));
+  if (status === 'approved') items.forEach(i => notify(i.email, `قسيمة راتب ${fmtMonth(month)} جاهزة`, '', '#/payslips', 'info'));
 }
 
 /** Mark items paid: treasury entry per person + advance installments recorded. */
@@ -109,7 +109,7 @@ export async function markPaid(month, emails) {
       tx.update(doc(db, 'payroll_items', i.id), { status: 'paid', paidAt: serverTimestamp(), paidBy: session.email });
       tx.set(doc(col('treasury')), { type: 'salary', amount: i.net, title: `راتب ${fmtMonth(month)} — ${i.name}`, email: i.email, month, date: new Date(now()).toISOString().slice(0, 10), by: session.email, at: serverTimestamp() });
     });
-    await notify(i.email, `تم تحويل راتب ${fmtMonth(month)}`, '', '#/payslips');
+    notify(i.email, `تم تحويل راتب ${fmtMonth(month)}`, '', '#/payslips', 'approved');
   }
   return items.length;
 }

@@ -2,6 +2,7 @@
 // final approval (balance ledger, schedule days, advances, attendance corrections).
 import {
   db, doc, col, addDoc, updateDoc, setDoc, getDoc, runTransaction, serverTimestamp, arrayUnion, list, query, where, read, watch, toMs
+, settle, listF, watchF
 } from '../core/fb.js';
 import { session, now, isHR, seesAll, isAdmin } from '../core/session.js';
 import {
@@ -92,15 +93,15 @@ function isFinanceUser() {
 }
 /** History for managers: requests of my team (leader) or everyone (HR) in a date window */
 export function watchManaged(fromYmd, cb) {
-  const f = [where('startDate', '>=', fromYmd)];
-  const q = seesAll() ? query(col('requests'), ...f) : query(col('requests'), where('leaderEmail', '==', session.email), ...f);
-  return watch(q, rows => cb(sortReq(rows)));
+  const f = [['startDate', '>=', fromYmd]];
+  if (!seesAll()) f.unshift(['leaderEmail', '==', session.email]);
+  return watchF('requests', f, rows => cb(sortReq(rows)));
 }
 export function requestsInRange(from, to, email, leaderEmail) {
-  const f = [where('startDate', '<=', to)];
-  if (email) f.unshift(where('email', '==', email));
-  if (leaderEmail) f.unshift(where('leaderEmail', '==', leaderEmail));
-  return list(query(col('requests'), ...f)).then(rows => rows.filter(r => (r.endDate || r.startDate) >= from));
+  const f = [['startDate', '<=', to]];
+  if (email) f.unshift(['email', '==', email]);
+  if (leaderEmail) f.unshift(['leaderEmail', '==', leaderEmail]);
+  return listF('requests', f).then(rows => rows.filter(r => (r.endDate || r.startDate) >= from));
 }
 
 // ---------- approvers ----------
@@ -199,15 +200,15 @@ export async function submitRequest(input) {
   const r = doc(col('requests'));
   if (input.attachmentData) {
     const aRef = doc(col('attachments'));
-    await setDoc(aRef, { owner: email, leaderEmail: req.leaderEmail, requestId: r.id, name: input.attachmentName || 'file', data: input.attachmentData, createdAt: serverTimestamp() });
+    await settle(setDoc(aRef, { owner: email, leaderEmail: req.leaderEmail, requestId: r.id, name: input.attachmentName || 'file', data: input.attachmentData, createdAt: serverTimestamp() }), 8000);
     req.attachmentId = aRef.id;
   }
-  await setDoc(r, req);
+  await settle(setDoc(r, req));
   track('request.submit', { target: r.id, detail: typeLabel(type) + (req.startDate ? ` ${req.startDate}${req.endDate && req.endDate !== req.startDate ? '→' + req.endDate : ''}` : '') });
   if (req.status === 'approved') await applyApproval(r.id);
   else {
     const stage = req.status.replace('pending_', '');
-    await notifyMany(approversFor(stage, req), L(`طلب جديد: ${typeLabel(type)}`, `New request: ${typeLabel(type)}`), `${req.name}`, '#/approvals');
+    notifyMany(approversFor(stage, req), L(`طلب جديد: ${typeLabel(type)}`, `New request: ${typeLabel(type)}`), `${req.name}`, '#/approvals', 'request');
   }
   return r.id;
 }
@@ -215,10 +216,10 @@ export async function submitRequest(input) {
 export async function cancelRequest(id) {
   const r = await read('requests', id);
   if (!r || !String(r.status).startsWith('pending')) throw userError('مينفعش تلغي طلب اتقفل.', 'Only pending requests can be cancelled.');
-  await updateDoc(doc(db, 'requests', id), {
+  await settle(updateDoc(doc(db, 'requests', id), {
     status: 'cancelled', updatedAt: serverTimestamp(),
     history: arrayUnion({ at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: 'cancelled', note: '' })
-  });
+  }));
   track('request.cancel', { target: id, detail: typeLabel(r.type) });
 }
 
@@ -231,17 +232,17 @@ export async function decide(id, action, note = '') {
   const entry = { at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: action === 'approve' ? `approved_${stage}` : `rejected_${stage}`, note };
   track(action === 'approve' ? 'request.approve' : 'request.reject', { target: r.email, detail: `${typeLabel(r.type)} — ${r.name || r.email}` });
   if (action === 'reject') {
-    await updateDoc(doc(db, 'requests', id), { status: 'rejected', updatedAt: serverTimestamp(), history: arrayUnion(entry), decidedBy: session.email });
-    await notify(r.email, L(`تم رفض طلبك: ${typeLabel(r.type)}`, `Request rejected: ${typeLabel(r.type)}`), note || '', '#/requests');
+    await settle(updateDoc(doc(db, 'requests', id), { status: 'rejected', updatedAt: serverTimestamp(), history: arrayUnion(entry), decidedBy: session.email }));
+    notify(r.email, L(`تم رفض طلبك: ${typeLabel(r.type)}`, `Request rejected: ${typeLabel(r.type)}`), note || '', '#/requests', 'rejected');
     return 'rejected';
   }
   const requester = person(r.email) || { leaderEmail: r.leaderEmail };
   const next = nextStatusFromStages(r);
   if (next !== 'approved') {
-    await updateDoc(doc(db, 'requests', id), { status: next, updatedAt: serverTimestamp(), history: arrayUnion(entry) });
+    await settle(updateDoc(doc(db, 'requests', id), { status: next, updatedAt: serverTimestamp(), history: arrayUnion(entry) }));
     const nextStage = next.replace('pending_', '');
-    await notifyMany(approversFor(nextStage, r), L(`طلب محتاج موافقتك: ${typeLabel(r.type)}`, `Request needs your approval: ${typeLabel(r.type)}`), r.name, '#/approvals');
-    await notify(r.email, L('طلبك اتنقل للمرحلة التالية', 'Your request moved forward'), `${typeLabel(r.type)} — ${statusLabel(next)}`, '#/requests');
+    notifyMany(approversFor(nextStage, r), L(`طلب محتاج موافقتك: ${typeLabel(r.type)}`, `Request needs your approval: ${typeLabel(r.type)}`), r.name, '#/approvals', 'request');
+    notify(r.email, L('طلبك اتوافق عليه واتنقل للمرحلة التالية', 'Your request was approved and moved to the next step'), `${typeLabel(r.type)} — ${statusLabel(next)}`, '#/requests', 'progress');
     return next;
   }
   await applyApproval(id, entry);
@@ -326,7 +327,7 @@ export async function applyApproval(id, entry) {
       mode: c.mode || undefined, note: L('طلب تصحيح معتمد', 'Approved correction request') + (r0.reason ? ` — ${r0.reason}` : '')
     });
   }
-  await notify(email, L(`تم اعتماد طلبك: ${typeLabel(r0.type)}`, `Request approved: ${typeLabel(r0.type)}`), r0.startDate || '', '#/requests');
+  notify(email, L(`تم اعتماد طلبك: ${typeLabel(r0.type)}`, `Request approved: ${typeLabel(r0.type)}`), r0.startDate || '', '#/requests', 'approved');
 }
 
 /** HR: revoke an approved leave/remote/mission (returns balance, clears schedule) */
@@ -362,7 +363,7 @@ export async function revokeRequest(id, note = '') {
       history: arrayUnion({ at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: 'revoked', note })
     });
   });
-  await notify(email, L(`تم إلغاء طلب معتمد: ${typeLabel(r0.type)}`, `Approved request revoked: ${typeLabel(r0.type)}`), note, '#/requests');
+  notify(email, L(`تم إلغاء طلب معتمد: ${typeLabel(r0.type)}`, `Approved request revoked: ${typeLabel(r0.type)}`), note, '#/requests', 'rejected');
 }
 
 export async function setResponse(id, text) {

@@ -135,3 +135,21 @@ export function formData(form) {
   return o;
 }
 export { html, raw };
+
+// ---------- live alert popup (chat messages, request updates) ----------
+export function livePop({ icon = 'fa-bell', cls = '', who = null, title = '', text = '', href = '', action = '', ttl = 9000 }) {
+  let root = document.querySelector('.chat-pops');
+  if (!root) { root = document.createElement('div'); root.className = 'chat-pops'; document.body.appendChild(root); }
+  const el = document.createElement('div');
+  el.className = `chat-pop ${cls}`; el.setAttribute('role', 'alert');
+  el.innerHTML = `${who ? avatar(who) : `<span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>`}
+    <div class="grow min0"><b class="truncate">${esc(title)}</b>${text ? `<p>${esc(text)}</p>` : ''}
+    <div class="row gap-8 mt-8">${href ? `<a class="btn btn-sm btn-primary" href="${esc(href)}">${esc(action || L('فتح', 'Open'))}</a>` : ''}<button class="btn btn-sm btn-ghost" data-x>${L('إغلاق', 'Dismiss')}</button></div></div>`;
+  const kill = () => { el.classList.add('out'); setTimeout(() => el.remove(), 250); };
+  el.querySelector('[data-x]').onclick = kill;
+  const a = el.querySelector('a'); if (a) a.addEventListener('click', kill);
+  root.prepend(el);
+  while (root.children.length > 3) root.lastChild.remove();
+  setTimeout(kill, ttl);
+  return el;
+}

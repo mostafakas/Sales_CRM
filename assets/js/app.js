@@ -11,9 +11,9 @@ import { auth, updatePassword, updateDoc, ref, read } from './core/fb.js';
 
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
+  { id: 'chat', group: 'me', icon: 'fa-comments', ar: 'الشات', en: 'Chat', load: () => import('./views/chat.js'), badge: 'chat', bottom: true },
   { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
   { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js') },
-  { id: 'chat', group: 'me', icon: 'fa-comments', ar: 'الشات', en: 'Chat', load: () => import('./views/chat.js'), badge: 'chat', bottom: true },
   { id: 'payslips', group: 'me', icon: 'fa-receipt', ar: 'قسائم الراتب', en: 'Payslips', load: () => import('./views/payslips.js') },
   { id: 'profile', group: 'me', icon: 'fa-circle-user', ar: 'حسابي', en: 'My profile', load: () => import('./views/profile.js') },
   { id: 'notifications', group: null, icon: 'fa-bell', ar: 'الإشعارات', en: 'Notifications', load: () => import('./views/notifications.js') },
@@ -47,11 +47,7 @@ function renderNav() {
   let h = '';
   Object.keys(GROUPS).forEach(g => {
     const items = ROUTES.filter(r => r.group === g && allowed(r));
-    if (g === 'apps') {
-      if (hasCRM()) h += `<div class="nav-group"><div class="nav-label">${esc(L(GROUPS.apps.ar, GROUPS.apps.en))}</div>
-        <a class="nav-item" href="sales_app.html" target="_blank" rel="noopener"><i class="fas fa-briefcase"></i><span>${L('المبيعات CRM', 'Sales CRM')}</span><i class="fas fa-arrow-up-right-from-square" style="margin-inline-start:auto;font-size:11px;opacity:.6"></i></a></div>`;
-      return;
-    }
+    if (g === 'apps') return; // the sales system link was removed from the menu
     if (!items.length) return;
     h += `<div class="nav-group"><div class="nav-label">${esc(L(GROUPS[g].ar, GROUPS[g].en))}</div>`;
     items.forEach(r => {
@@ -62,7 +58,7 @@ function renderNav() {
   nav.innerHTML = h;
   const bn = byId('bottom-nav');
   bn.innerHTML = ROUTES.filter(r => r.bottom && allowed(r)).slice(0, 4).map(r =>
-    `<a href="#/${r.id}" data-route="${r.id}"><i class="fas ${r.icon}"></i><span>${esc(L(r.ar, r.en))}</span></a>`).join('') +
+    `<a href="#/${r.id}" data-route="${r.id}" style="position:relative"><i class="fas ${r.icon}"></i><span>${esc(L(r.ar, r.en))}</span>${r.badge ? `<span class="badge-count hidden bn-badge" data-badge="${r.badge}"></span>` : ''}</a>`).join('') +
     `<a href="#" id="bn-more"><i class="fas fa-bars"></i><span>${L('المزيد', 'More')}</span></a>`;
   byId('bn-more').onclick = (e) => { e.preventDefault(); document.body.classList.add('nav-open'); };
   renderUserChip();
@@ -88,41 +84,22 @@ function setBadges() {
   const n = unreadCount();
   const bc = byId('bell-count'); bc.textContent = n > 9 ? '9+' : n; bc.classList.toggle('hidden', !n);
   document.querySelectorAll('[data-badge="chat"]').forEach(b => { b.textContent = chatCount > 99 ? '99+' : chatCount; b.classList.toggle('hidden', !chatCount); });
-  const cc = byId('chat-count'); if (cc) { cc.textContent = chatCount > 9 ? '9+' : chatCount; cc.classList.toggle('hidden', !chatCount); }
   const base = document.title.replace(/^\(\d+\+?\)\s*/, '');
   document.title = (chatCount ? `(${chatCount > 99 ? '99+' : chatCount}) ` : '') + base;
 }
 
-/** New chat messages: badge everywhere + a popup (and a browser notification when the tab is hidden) */
+/** New chat messages: badge in the menu + a popup with a short sound (and a browser notification when the tab is hidden) */
 async function startChatWatcher() {
-  const { watchMyChats, unreadOf, otherOf } = await import('./services/chat.js');
+  const { watchMyChats, unreadOf } = await import('./services/chat.js');
   const { person, nameOf } = await import('./services/directory.js');
-  const { avatar } = await import('./core/ui.js');
+  const { livePop } = await import('./core/ui.js');
+  const { play } = await import('./core/sounds.js');
   const { toMs } = await import('./core/fb.js');
   let seen = now();
-  let audio = null;
-  const beep = () => {
-    try {
-      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-      const o = audio.createOscillator(), g = audio.createGain();
-      o.type = 'sine'; o.frequency.value = 880; g.gain.setValueAtTime(0.0001, audio.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.12, audio.currentTime + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.35);
-      o.connect(g).connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.4);
-    } catch {}
-  };
   const popup = (c, lm) => {
     const from = person(lm.by) || { email: lm.by, name: nameOf(lm.by) };
-    let root = document.querySelector('.chat-pops');
-    if (!root) { root = document.createElement('div'); root.className = 'chat-pops'; document.body.appendChild(root); }
-    const el = document.createElement('div');
-    el.className = 'chat-pop'; el.setAttribute('role', 'alert');
-    el.innerHTML = `${avatar(from)}<div class="grow min0"><b class="truncate">${esc(from.name || from.email)}</b><p>${esc(lm.text || '')}</p>
-      <div class="row gap-8 mt-8"><a class="btn btn-sm btn-primary" href="#/chat/${encodeURIComponent(c.id)}"><i class="fas fa-reply"></i> ${L('رد', 'Reply')}</a><button class="btn btn-sm btn-ghost" data-x>${L('إغلاق', 'Dismiss')}</button></div></div>`;
-    const kill = () => { el.classList.add('out'); setTimeout(() => el.remove(), 250); };
-    el.querySelector('[data-x]').onclick = kill; el.querySelector('a').addEventListener('click', kill);
-    root.prepend(el); while (root.children.length > 3) root.lastChild.remove();
-    setTimeout(kill, 9000);
-    beep();
+    livePop({ who: from, title: from.name || from.email, text: lm.text || '', href: `#/chat/${encodeURIComponent(c.id)}`, action: L('رد', 'Reply') });
+    play('receive');
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
       try { const n = new Notification(from.name || from.email, { body: lm.text || '', icon: 'assets/img/icon-192.png', tag: c.id }); n.onclick = () => { window.focus(); location.hash = `#/chat/${encodeURIComponent(c.id)}`; n.close(); }; } catch {}
     }
@@ -228,6 +205,7 @@ async function boot() {
   }
   await startDirectory();
   if (isHR() && !policy.trackingStart) { try { await savePolicy({ trackingStart: ymd(now()) }); } catch (e) { console.warn(e); } }
+  window.addEventListener('am:late-error', (e) => toastErr(e.detail, L('ما اتحفظش', 'Not saved')));
   startNotifications();
   startChatWatcher().catch(e => console.warn('chat', e && e.message));
   onNotifications(setBadges);

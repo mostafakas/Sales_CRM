@@ -46,7 +46,9 @@ a.shot('f6-chat-emp1')
 
 # 3) emp2: badge, open, unread cleared, reply, popup for a new incoming message
 a.login('emp2@almaster.tech'); pg.wait_for_timeout(1200)
-ok(pg.locator('#chat-count').inner_text() == '3', f"topbar chat badge = {pg.locator('#chat-count').inner_text()}")
+ok(pg.locator('#nav [data-badge=chat]').inner_text() == '3', f"sidebar chat badge = {pg.locator('#nav [data-badge=chat]').inner_text()}")
+nav_items = pg.locator('#nav .nav-item').all_inner_texts()
+ok(any('الشات' in t for t in nav_items[:3]) and not any('CRM' in t or 'المبيعات' in t for t in nav_items), 'chat tab near the top of the side menu, no sales link')
 a.go(f'#/chat/{cid}'); pg.wait_for_timeout(1200)
 ok(pg.locator('.chat-row.them').count() == 3, 'recipient sees the 3 messages')
 ok(a.db(f'chats/{cid}')['unread']['emp2_almaster_tech'] == 0, 'opening clears unread')

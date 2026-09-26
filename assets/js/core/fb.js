@@ -60,3 +60,39 @@ export function watch(target, cb, onErr) {
   }, err => { console.warn('[watch]', err && err.message); onErr && onErr(err); });
 }
 export const toMs = (v) => v == null ? null : (typeof v === 'number' ? v : (v.toMillis ? v.toMillis() : (v.seconds != null ? v.seconds * 1000 : null)));
+
+/**
+ * Wait for a write at most `ms`. Firestore applies writes locally at once and syncs them in the background,
+ * so the screen never hangs on a slow connection. A failure that arrives later is reported via 'am:late-error'.
+ */
+export function settle(p, ms = 5000) {
+  let late = false;
+  p.catch(e => { if (late) window.dispatchEvent(new CustomEvent('am:late-error', { detail: e })); });
+  return Promise.race([p, new Promise(res => setTimeout(() => { late = true; res(); }, ms))]);
+}
+
+// ---- queries that survive a missing composite index ----
+// filters: [[field, op, value], …]. If Firestore answers "needs an index", the query is re-run with the
+// equality filters only and the range filters are applied here, so screens keep working until the
+// indexes in firestore.indexes.json are published.
+const OPS = { '==': (a, b) => a === b, '>=': (a, b) => a >= b, '<=': (a, b) => a <= b, '>': (a, b) => a > b, '<': (a, b) => a < b };
+const needsIndex = (e) => /failed-precondition|index/i.test(String((e && (e.code || '')) + ' ' + (e && e.message || '')));
+const applyJs = (rows, filters) => rows.filter(r => filters.every(([f, op, v]) => r[f] !== undefined && OPS[op](r[f], v)));
+export async function listF(path, filters) {
+  try { return await list(query(col(path), ...filters.map(([f, op, v]) => where(f, op, v)))); }
+  catch (e) {
+    if (!needsIndex(e)) throw e;
+    console.warn('[index missing] falling back for', path, filters.map(x => x[0]).join(','));
+    return applyJs(await list(query(col(path), ...filters.filter(x => x[1] === '==').map(([f, op, v]) => where(f, op, v)))), filters);
+  }
+}
+export function watchF(path, filters, cb) {
+  let off = null, stopped = false;
+  const full = () => watch(query(col(path), ...filters.map(([f, op, v]) => where(f, op, v))), cb, (e) => {
+    if (stopped || !needsIndex(e)) return;
+    console.warn('[index missing] falling back for', path);
+    off = watch(query(col(path), ...filters.filter(x => x[1] === '==').map(([f, op, v]) => where(f, op, v))), (rows, snap) => cb(applyJs(rows, filters), snap));
+  });
+  off = full();
+  return () => { stopped = true; off && off(); };
+}

@@ -5,6 +5,7 @@ import { session, now, isHR, isAdmin } from '../core/session.js';
 import { REQUEST_TYPES, typeLabel } from '../core/policy.js';
 import { watchInbox, watchManaged, decide, revokeRequest, setResponse, getBalance, remaining } from '../services/requests.js';
 import { requestCard, showRequestDetails, requestTitle } from './request-card.js';
+import { play } from '../core/sounds.js';
 
 export default async function render(root) {
   let inbox = [], history = [], tab = 'inbox', typeF = '', histUnsub = null;
@@ -70,6 +71,7 @@ export default async function render(root) {
       await busy(btn, async () => {
         try {
           const res = await decide(id, 'approve', note || '');
+          play('approved');
           if (note) await setResponse(id, note);
           toast(res === 'approved' ? L('تم اعتماد الطلب', 'Request approved') : L('اتنقل للمرحلة التالية', 'Moved to next stage'), `${r.name} — ${requestTitle(r)}`);
         } catch (e) { toastErr(e); }
@@ -79,7 +81,7 @@ export default async function render(root) {
       const r = find(id); if (!r) return;
       const note = await confirmDialog({ title: L('رفض الطلب', 'Reject request'), message: `${r.name} — ${requestTitle(r)}`, okText: L('رفض', 'Reject'), okClass: 'btn-danger', input: { label: L('سبب الرفض (هيوصل للموظف)', 'Reason (sent to the employee)'), required: true } });
       if (note === null) return;
-      try { await decide(id, 'reject', note); toast(L('تم رفض الطلب', 'Request rejected')); } catch (e) { toastErr(e); }
+      try { await decide(id, 'reject', note); play('rejected'); toast(L('تم رفض الطلب', 'Request rejected')); } catch (e) { toastErr(e); }
     },
     revoke: async ({ id }) => {
       const note = await confirmDialog({ title: L('إلغاء اعتماد', 'Revoke approval'), message: L('الرصيد هيرجع للموظف والأيام هتتشال من الجدول.', 'The balance is returned and the days are removed from the schedule.'), okText: L('إلغاء الاعتماد', 'Revoke'), okClass: 'btn-danger', input: { label: L('السبب', 'Reason'), required: true } });

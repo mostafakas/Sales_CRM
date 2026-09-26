@@ -4,6 +4,7 @@ import { toast, toastErr, avatar, empty, loader, confirmDialog, modal, STATUS_ME
 import { session, now, isAdmin } from '../core/session.js';
 import { read, toMs } from '../core/fb.js';
 import { activePeople, person, nameOf, onDirectory } from '../services/directory.js';
+import { play } from '../core/sounds.js';
 import { ensureChat, watchMyChats, watchAllChats, watchMessages, sendText, sendFile, loadFile, markRead, archiveChat, listArchive, otherOf, unreadOf, ek, MAX_FILE } from '../services/chat.js';
 
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -128,7 +129,14 @@ export default async function render(root, { params }) {
           <textarea class="input chat-input" id="text" rows="1" placeholder="${L('اكتب رسالة…', 'Write a message…')}"></textarea>
           <button class="btn btn-primary btn-icon" type="submit" aria-label="${L('إرسال', 'Send')}"><i class="fas fa-paper-plane" data-flip></i></button>
         </div></form>` : ''}`;
-    unMsgs = watchMessages(id, rows => { msgs = rows; drawMsgs(); if (member && !document.hidden) markRead(openChat); });
+    let known = null;
+    unMsgs = watchMessages(id, rows => {
+      // a new message from the other person while the conversation is open → soft "receive" sound
+      if (known && rows.some(m => !known.has(m.id) && m.by !== session.email)) play('receive');
+      known = new Set(rows.map(m => m.id));
+      msgs = rows; drawMsgs();
+      if (member && !document.hidden) markRead(openChat);
+    });
     if (member) wireComposer();
     if (admin) {
       $('#arch').onclick = async () => {
@@ -199,6 +207,7 @@ export default async function render(root, { params }) {
       e.preventDefault();
       const t = ta.value; if (!t.trim()) return;
       ta.value = ''; grow();
+      play('send');
       try { await sendText(openChat, t); } catch (ex) { ta.value = t; toastErr(ex); }
     };
     const upload = async (files) => {
@@ -206,7 +215,7 @@ export default async function render(root, { params }) {
       for (const file of files) {
         if (file.size > MAX_FILE && !/^image\//.test(file.type)) { toast(L('الملف كبير', 'File too large'), L(`${file.name} أكبر من 5 ميجا.`, `${file.name} is larger than 5 MB.`), 'bad'); continue; }
         up.classList.remove('hidden'); bar.style.width = '5%'; label.textContent = file.name;
-        try { await sendFile(openChat, file, '', (p) => { bar.style.width = Math.round(p * 100) + '%'; }); }
+        try { await sendFile(openChat, file, '', (p) => { bar.style.width = Math.round(p * 100) + '%'; }); play('send'); }
         catch (ex) { toastErr(ex); }
       }
       up.classList.add('hidden');

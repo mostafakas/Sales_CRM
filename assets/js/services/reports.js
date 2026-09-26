@@ -1,5 +1,5 @@
 // Monthly calculations shared by "My attendance", monthly reports and payroll.
-import { list, query, col, where, toMs } from '../core/fb.js';
+import { list, query, col, where, toMs, listF } from '../core/fb.js';
 import { session, now, isHR, seesAll, isFinance } from '../core/session.js';
 import { policy, planFor, lateness, earlyLeave, isWorkingPlan, lateDeductionDays, dayKey, leaveType, trackedSince } from '../core/policy.js';
 import { person } from './directory.js';
@@ -103,7 +103,7 @@ export async function teamMonth(ym, { people } = {}) {
   const [days, schedules, reqs] = await Promise.all([
     rangeDays(from, to, scope),
     list(query(col('schedules'), ...(scope ? [where('leaderEmail', '==', scope)] : []), where('month', '==', ym))).catch(() => []),
-    list(query(col('requests'), ...(scope ? [where('leaderEmail', '==', scope)] : []), where('startDate', '>=', `${ym}-01`))).catch(() => [])
+    listF('requests', [...(scope ? [['leaderEmail', '==', scope]] : []), ['startDate', '>=', `${ym}-01`]]).catch(() => [])
   ]);
   const ppl = (people || (all ? activePeople() : activePeople().filter(p => p.leaderEmail === session.email))).filter(p => p.trackAttendance !== false);
   const todayKey = dayKey(now());
