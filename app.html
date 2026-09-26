@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AL MASTER | HR</title>
+  <meta name="theme-color" content="#0a0f3d">
+  <link rel="icon" href="assets/img/favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/img/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script>
+    (function () {
+      try {
+        var l = localStorage.getItem('am_lang') || 'ar';
+        document.documentElement.lang = l; document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+        var t = localStorage.getItem('am_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="splash" id="splash"><img src="assets/img/logo-mark-white.png" alt=""><span class="spinner" style="border-color:rgba(255,255,255,.15);border-top-color:#fff"></span></div>
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="sidebar-brand"><img src="assets/img/logo-white.png" alt="AL MASTER"></div>
+      <nav class="sidebar-nav" id="nav"></nav>
+      <div class="sidebar-foot">
+        <div class="user-chip" id="user-chip"></div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="btn btn-ghost btn-icon menu-btn" id="menu-btn" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="grow">
+          <h1 id="page-title">—</h1>
+        </div>
+        <div class="row gap-8">
+          <div class="no-print" style="text-align:end;line-height:1.2">
+            <div class="clock" id="clock">--:--</div>
+            <div class="date" id="today"></div>
+          </div>
+          <a href="#/notifications" class="btn btn-ghost btn-icon" id="bell" aria-label="Notifications" style="position:relative">
+            <i class="fas fa-bell"></i><span class="badge-count hidden" id="bell-count" style="position:absolute;top:2px;inset-inline-end:0"></span>
+          </a>
+          <button class="btn btn-ghost btn-icon" id="theme-btn" aria-label="Theme"><i class="fas fa-moon"></i></button>
+          <button class="btn btn-ghost btn-sm" id="lang-btn" style="font-weight:800">EN</button>
+        </div>
+      </header>
+      <main class="content" id="view" tabindex="-1"></main>
+    </div>
+  </div>
+  <nav class="bottom-nav" id="bottom-nav"></nav>
+
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

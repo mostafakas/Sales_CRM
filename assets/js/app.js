@@ -1,0 +1,186 @@
+// App shell: session, navigation by role, router, clock, notifications badge.
+import { L, isAr, esc, setLang, toggleTheme, fmtLongDate, zparts, pad, byId } from './core/utils.js';
+import { requireSession, session, isHR, isLeader, isFinance, isAdmin, hasCRM, canApprove, logout, now } from './core/session.js';
+import { loadPolicy, roleLabel, policy, savePolicy } from './core/policy.js';
+import { ymd } from './core/utils.js';
+import { toast, toastErr, modal, avatar } from './core/ui.js';
+import { startDirectory } from './services/directory.js';
+import { startNotifications, onNotifications, unreadCount } from './services/notify.js';
+import { watchInbox } from './services/requests.js';
+import { auth, updatePassword, updateDoc, ref } from './core/fb.js';
+
+const ROUTES = [
+  { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
+  { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
+  { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js'), bottom: true },
+  { id: 'payslips', group: 'me', icon: 'fa-receipt', ar: 'قسائم الراتب', en: 'Payslips', load: () => import('./views/payslips.js') },
+  { id: 'profile', group: 'me', icon: 'fa-circle-user', ar: 'حسابي', en: 'My profile', load: () => import('./views/profile.js') },
+  { id: 'notifications', group: null, icon: 'fa-bell', ar: 'الإشعارات', en: 'Notifications', load: () => import('./views/notifications.js') },
+
+  { id: 'monitor', group: 'team', icon: 'fa-signal', ar: 'المتابعة اللحظية', en: 'Live monitor', when: () => isLeader() || isHR(), load: () => import('./views/monitor.js') },
+  { id: 'approvals', group: 'team', icon: 'fa-inbox', ar: 'الموافقات', en: 'Approvals', when: canApprove, load: () => import('./views/approvals.js'), badge: 'inbox', bottom: true },
+  { id: 'leaves', group: 'team', icon: 'fa-umbrella-beach', ar: 'الإجازات والأرصدة', en: 'Leaves & balances', when: () => isLeader() || isHR(), load: () => import('./views/leaves.js') },
+  { id: 'reports', group: 'team', icon: 'fa-chart-column', ar: 'التقارير الشهرية', en: 'Monthly reports', when: () => isLeader() || isHR() || isFinance(), load: () => import('./views/reports.js') },
+
+  { id: 'employees', group: 'hr', icon: 'fa-users', ar: 'الموظفين', en: 'Employees', when: isHR, load: () => import('./views/employees.js') },
+  { id: 'daily', group: 'hr', icon: 'fa-user-clock', ar: 'الحضور اليومي', en: 'Daily attendance', when: isHR, load: () => import('./views/daily.js') },
+  { id: 'schedules', group: 'hr', icon: 'fa-calendar-days', ar: 'الجداول', en: 'Schedules', when: () => isHR() || isLeader(), load: () => import('./views/schedules.js') },
+
+  { id: 'payroll', group: 'finance', icon: 'fa-money-check-dollar', ar: 'الرواتب', en: 'Payroll', when: isFinance, load: () => import('./views/payroll.js') },
+  { id: 'treasury', group: 'finance', icon: 'fa-vault', ar: 'الخزينة والمصروفات', en: 'Treasury', when: isFinance, load: () => import('./views/treasury.js') },
+
+  { id: 'settings', group: 'admin', icon: 'fa-sliders', ar: 'الإعدادات', en: 'Settings', when: () => isAdmin() || isHR(), load: () => import('./views/settings.js') }
+];
+const GROUPS = {
+  me: { ar: 'أنا', en: 'Me' }, team: { ar: 'الفريق', en: 'Team' }, hr: { ar: 'الموارد البشرية', en: 'Human resources' },
+  finance: { ar: 'المالية', en: 'Finance' }, admin: { ar: 'النظام', en: 'System' }, apps: { ar: 'تطبيقات', en: 'Apps' }
+};
+
+let current = null; // { id, cleanup }
+let inboxCount = 0;
+const allowed = (r) => !r.when || r.when();
+
+function renderNav() {
+  const nav = byId('nav');
+  let h = '';
+  Object.keys(GROUPS).forEach(g => {
+    const items = ROUTES.filter(r => r.group === g && allowed(r));
+    if (g === 'apps') {
+      if (hasCRM()) h += `<div class="nav-group"><div class="nav-label">${esc(L(GROUPS.apps.ar, GROUPS.apps.en))}</div>
+        <a class="nav-item" href="sales_app.html" target="_blank" rel="noopener"><i class="fas fa-briefcase"></i><span>${L('المبيعات CRM', 'Sales CRM')}</span><i class="fas fa-arrow-up-right-from-square" style="margin-inline-start:auto;font-size:11px;opacity:.6"></i></a></div>`;
+      return;
+    }
+    if (!items.length) return;
+    h += `<div class="nav-group"><div class="nav-label">${esc(L(GROUPS[g].ar, GROUPS[g].en))}</div>`;
+    items.forEach(r => {
+      h += `<a class="nav-item" href="#/${r.id}" data-route="${r.id}"><i class="fas ${r.icon}"></i><span>${esc(L(r.ar, r.en))}</span>${r.badge ? `<span class="badge-count hidden" data-badge="${r.badge}"></span>` : ''}</a>`;
+    });
+    h += '</div>';
+  });
+  nav.innerHTML = h;
+  const bn = byId('bottom-nav');
+  bn.innerHTML = ROUTES.filter(r => r.bottom && allowed(r)).slice(0, 4).map(r =>
+    `<a href="#/${r.id}" data-route="${r.id}"><i class="fas ${r.icon}"></i><span>${esc(L(r.ar, r.en))}</span></a>`).join('') +
+    `<a href="#" id="bn-more"><i class="fas fa-bars"></i><span>${L('المزيد', 'More')}</span></a>`;
+  byId('bn-more').onclick = (e) => { e.preventDefault(); document.body.classList.add('nav-open'); };
+  renderUserChip();
+}
+function renderUserChip() {
+  const p = session.profile || {};
+  byId('user-chip').innerHTML = `${avatar({ ...p, email: session.email }, 'sm')}
+    <div class="who"><b class="truncate">${esc(p.name || session.email)}</b><span>${esc(p.title || roleLabel(session.role))}</span></div>
+    <button class="btn btn-on-navy btn-icon btn-sm" id="logout-btn" title="${L('تسجيل خروج', 'Sign out')}" aria-label="${L('تسجيل خروج', 'Sign out')}"><i class="fas fa-right-from-bracket"></i></button>`;
+  byId('logout-btn').onclick = async () => {
+    const { confirmDialog } = await import('./core/ui.js');
+    const live = p.status && p.status !== 'Offline';
+    const ok = await confirmDialog({
+      title: L('تسجيل الخروج', 'Sign out'),
+      message: live ? L('لسه يومك شغال. تسجيل الخروج مش هيقفل اليوم — استخدم «إنهاء اليوم» من صفحة يومي لو خلصت شغل.', 'Your day is still running. Signing out does not end it — use "End day" on My day when you finish.') : '',
+      okText: L('خروج', 'Sign out')
+    });
+    if (ok) logout();
+  };
+}
+function setBadges() {
+  document.querySelectorAll('[data-badge="inbox"]').forEach(b => { b.textContent = inboxCount; b.classList.toggle('hidden', !inboxCount); });
+  const n = unreadCount();
+  const bc = byId('bell-count'); bc.textContent = n > 9 ? '9+' : n; bc.classList.toggle('hidden', !n);
+}
+
+async function route() {
+  const hash = location.hash.replace(/^#\/?/, '') || 'home';
+  const [id, ...rest] = hash.split('/');
+  let r = ROUTES.find(x => x.id === id);
+  if (!r || !allowed(r)) r = ROUTES[0];
+  document.body.classList.remove('nav-open');
+  document.querySelectorAll('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === r.id));
+  byId('page-title').textContent = L(r.ar, r.en);
+  document.title = `${L(r.ar, r.en)} | AL MASTER`;
+  if (current && current.cleanup) { try { current.cleanup(); } catch {} }
+  const view = byId('view');
+  view.innerHTML = `<div class="page-loader"><span class="spinner"></span></div>`;
+  try {
+    const mod = await r.load();
+    const token = {};
+    current = { id: r.id, token };
+    // fresh container per visit so listeners bound by a view never pile up
+    const host = document.createElement('div');
+    view.replaceChildren(host);
+    const cleanup = await mod.default(host, { params: rest });
+    if (current.token === token) current.cleanup = cleanup;
+    else if (cleanup) cleanup();
+  } catch (e) {
+    console.error(e);
+    view.innerHTML = `<div class="card card-pad"><div class="empty"><i class="fas fa-triangle-exclamation"></i><b>${L('تعذّر تحميل الصفحة', 'Could not load this page')}</b><span>${esc(e && e.message || '')}</span></div></div>`;
+  }
+  view.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}
+
+function startClock() {
+  const tick = () => {
+    const p = zparts(now());
+    byId('clock').textContent = `${pad(p.h)}:${pad(p.mi)}`;
+    byId('today').textContent = fmtLongDate(now());
+  };
+  tick(); setInterval(tick, 15000);
+}
+
+async function forcePasswordChange() {
+  const m = modal({
+    title: L('غيّر كلمة المرور', 'Change your password'), icon: 'fa-key', locked: true, size: 'narrow',
+    body: `<p class="muted mb-16">${L('ده أول دخول ليك. اختار كلمة مرور جديدة خاصة بيك (8 حروف على الأقل).', 'This is your first sign-in. Choose your own password (at least 8 characters).')}</p>
+      <form id="pw-form" class="col">
+        <div class="field"><label>${L('كلمة المرور الجديدة', 'New password')}</label><input class="input" type="password" name="p1" minlength="8" required autocomplete="new-password"></div>
+        <div class="field"><label>${L('تأكيد كلمة المرور', 'Confirm password')}</label><input class="input" type="password" name="p2" minlength="8" required autocomplete="new-password"></div>
+        <div id="pw-err" class="alert bad hidden"></div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit">${L('حفظ', 'Save')}</button>
+      </form>`
+  });
+  m.$('#pw-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, p1 = f.p1.value, p2 = f.p2.value, err = m.$('#pw-err');
+    if (p1.length < 8 || p1 !== p2) { err.textContent = L('كلمتين المرور مش متطابقين أو أقصر من 8 حروف.', 'Passwords do not match or are shorter than 8 characters.'); err.classList.remove('hidden'); return; }
+    try {
+      await updatePassword(auth.currentUser, p1);
+      await updateDoc(ref('users', session.email), { mustChangePassword: false });
+      m.close(); toast(L('تم تغيير كلمة المرور', 'Password changed'));
+    } catch (ex) {
+      if (ex && ex.code === 'auth/requires-recent-login') { err.textContent = L('سجّل خروج وادخل تاني وبعدين غيّرها.', 'Please sign out, sign in again, then retry.'); err.classList.remove('hidden'); }
+      else toastErr(ex);
+    }
+  };
+}
+
+async function boot() {
+  byId('lang-btn').textContent = isAr ? 'EN' : 'ع';
+  byId('lang-btn').onclick = () => setLang(isAr ? 'en' : 'ar');
+  const setThemeIcon = () => { byId('theme-btn').innerHTML = `<i class="fas ${document.documentElement.dataset.theme === 'dark' ? 'fa-sun' : 'fa-moon'}"></i>`; };
+  setThemeIcon();
+  byId('theme-btn').onclick = () => { toggleTheme(); setThemeIcon(); };
+  byId('menu-btn').onclick = () => document.body.classList.toggle('nav-open');
+  byId('scrim').onclick = () => document.body.classList.remove('nav-open');
+
+  try {
+    await requireSession({ onProfileChange: (p) => { renderUserChip(); window.dispatchEvent(new CustomEvent('am:profile', { detail: p })); } });
+    await loadPolicy();
+  } catch (e) {
+    console.error(e);
+    byId('splash').innerHTML = `<div style="color:#fff;text-align:center;padding:24px"><b>${L('تعذّر الاتصال بالسيرفر', 'Could not reach the server')}</b><p style="opacity:.7;margin-top:8px">${esc(e && e.message || '')}</p><button class="btn btn-on-navy mt-16" onclick="location.reload()">${L('إعادة المحاولة', 'Retry')}</button></div>`;
+    return;
+  }
+  await startDirectory();
+  if (isHR() && !policy.trackingStart) { try { await savePolicy({ trackingStart: ymd(now()) }); } catch (e) { console.warn(e); } }
+  startNotifications();
+  onNotifications(setBadges);
+  if (canApprove()) watchInbox(rows => { inboxCount = rows.length; setBadges(); });
+  renderNav();
+  startClock();
+  window.addEventListener('hashchange', route);
+  await route();
+  const s = byId('splash'); s.style.opacity = '0'; setTimeout(() => s.remove(), 300);
+  if (session.profile && session.profile.mustChangePassword) forcePasswordChange();
+  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('Notification' in window && Notification.permission === 'default') setTimeout(() => { try { Notification.requestPermission(); } catch {} }, 4000);
+}
+boot();

@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALMASTER ERP & CRM</title>
+    <meta name="theme-color" content="#0ea5e9">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Outfit:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 900: '#0c4a6e' },
+                        dark: { 800: '#1e293b', 900: '#0f172a' }
+                    },
+                    fontFamily: { sans: ['Cairo', 'Outfit', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: #f8fafc; font-family: 'Cairo', sans-serif; overflow-x: hidden; }
+        .dark-mode body { background-color: #0f172a; color: #f1f5f9; }
+        .hidden-view { display: none !important; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        .glass-card { background: white; border: 1px solid #e2e8f0; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .dark-mode .glass-card { background: #1e293b; border-color: #334155; }
+        .form-input { width: 100%; padding: 10px 14px; border-radius: 0.75rem; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+        .form-input:focus { border-color: #0ea5e9; outline: none; background: white; }
+        .dark-mode .form-input { background: #0f172a; border-color: #475569; color: white; }
+        .nav-item.active { background-color: #f0f9ff; color: #0284c7; border-right: 4px solid #0ea5e9; }
+        .dark-mode .nav-item.active { background-color: #0c4a6e; color: #38bdf8; }
+        
+        .kanban-col { min-height: 500px; background: #f1f5f9; border-radius: 1rem; padding: 1rem; }
+        .dark-mode .kanban-col { background: #1e293b; }
+        .kanban-card { background: white; padding: 1rem; border-radius: 0.75rem; margin-bottom: 0.75rem; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .dark-mode .kanban-card { background: #0f172a; border-color: #334155; }
+    </style>
+</head>
+
+<body class="flex h-screen text-slate-800 antialiased">
+
+    <div id="loader" class="fixed inset-0 z-[200] bg-white dark:bg-slate-900 flex flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-4 border-primary-500 mb-4"></div>
+        <h2 class="text-lg font-bold">جاري تحميل النظام المالي...</h2>
+    </div>
+
+    <aside class="w-64 bg-white dark:bg-slate-800 border-l border-slate-200 dark:border-slate-700 flex flex-col shadow-lg z-20 hidden md:flex">
+        <div class="h-20 flex items-center justify-center border-b border-slate-100 dark:border-slate-700">
+            <h1 class="text-2xl font-black text-primary-600 tracking-tight">ALMASTER <span class="text-slate-800 dark:text-white text-sm">ERP</span></h1>
+        </div>
+        
+        <nav class="flex-1 py-4 px-3 space-y-1 custom-scrollbar overflow-y-auto">
+            <button onclick="switchView('dashboard')" id="nav-dashboard" class="nav-item active w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-600 transition"><i class="fas fa-chart-pie w-5"></i> لوحة التحكم</button>
+            <button onclick="switchView('clients')" id="nav-clients" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-600 transition"><i class="fas fa-users w-5"></i> إدارة العملاء</button>
+            <button onclick="switchView('projects')" id="nav-projects" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-600 transition"><i class="fas fa-project-diagram w-5"></i> إدارة المشاريع والمهام</button>
+            <button onclick="switchView('financials')" id="nav-financials" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-slate-600 transition"><i class="fas fa-file-invoice-dollar w-5"></i> الفواتير والمصروفات</button>
+            
+            <div class="mt-6 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <button onclick="window.location.href='index.html'" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 transition shadow-md"><i class="fas fa-desktop w-5"></i> سيستم التشغيل والمهام</button>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+            <div class="flex items-center gap-3">
+                <img id="sidebar-user-img" src="" class="w-10 h-10 rounded-full border-2 border-primary-500 object-cover">
+                <div class="overflow-hidden">
+                    <p id="sidebar-user-name" class="text-sm font-black dark:text-white truncate">User</p>
+                    <p id="sidebar-user-role" class="text-[10px] text-primary-500 font-bold uppercase">Role</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 dark:bg-[#0f172a]">
+        <header class="h-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-6 flex items-center justify-between z-10">
+            <h2 id="page-title" class="text-xl font-black text-slate-800 dark:text-white">لوحة التحكم</h2>
+            <button onclick="toggleDarkMode()" class="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-primary-600 transition"><i class="fas fa-moon"></i></button>
+        </header>
+
+        <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+            
+            <div id="view-dashboard" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div class="glass-card p-5 border-b-4 border-blue-500"><p class="text-xs font-bold text-slate-500">إجمالي المشاريع</p><h3 id="dash-projects" class="text-3xl font-black mt-1">0</h3></div>
+                    <div class="glass-card p-5 border-b-4 border-green-500"><p class="text-xs font-bold text-slate-500">إجمالي التعاقدات (المتوقع)</p><h3 id="dash-revenue" class="text-2xl font-black text-green-600 mt-1">0 <span class="text-sm">ر.س</span></h3></div>
+                    <div class="glass-card p-5 border-b-4 border-red-500"><p class="text-xs font-bold text-slate-500">المصروفات الفعلية</p><h3 id="dash-expenses" class="text-2xl font-black text-red-500 mt-1">0 <span class="text-sm">ر.س</span></h3></div>
+                    <div class="glass-card p-5 border-b-4 border-primary-500"><p class="text-xs font-bold text-slate-500">صافي الربح الفعلي</p><h3 id="dash-profit" class="text-2xl font-black text-primary-600 mt-1">0 <span class="text-sm">ر.س</span></h3></div>
+                </div>
+            </div>
+
+            <div id="view-clients" class="hidden-view space-y-4">
+                <div class="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <h3 class="font-bold">إدارة العملاء (CRM)</h3>
+                    <button onclick="openNewClient()" class="bg-primary-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow"><i class="fas fa-plus"></i> عميل جديد</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="kanban-col"><h4 class="font-black mb-4 text-yellow-600 border-b-2 border-yellow-200 pb-2">🎯 محتمل (Leads)</h4><div id="kb-lead" class="space-y-3"></div></div>
+                    <div class="kanban-col"><h4 class="font-black mb-4 text-green-600 border-b-2 border-green-200 pb-2">🤝 نشط (Active)</h4><div id="kb-active" class="space-y-3"></div></div>
+                    <div class="kanban-col"><h4 class="font-black mb-4 text-slate-600 border-b-2 border-slate-200 pb-2">📦 عملاء سابقين</h4><div id="kb-old" class="space-y-3"></div></div>
+                    <div class="kanban-col"><h4 class="font-black mb-4 text-red-600 border-b-2 border-red-200 pb-2">🚫 القائمة السوداء</h4><div id="kb-blacklist" class="space-y-3"></div></div>
+                </div>
+            </div>
+
+            <div id="view-projects" class="hidden-view space-y-4">
+                <div class="flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <h3 class="font-bold">المشاريع وربط المهام</h3>
+                    <button onclick="openNewProject()" class="bg-primary-600 text-white px-4 py-2 rounded-lg font-bold text-sm shadow"><i class="fas fa-folder-plus"></i> مشروع جديد</button>
+                </div>
+                <div class="grid grid-cols-1 gap-4" id="projects-list"></div>
+            </div>
+
+            <div id="view-financials" class="hidden-view space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="glass-card p-5">
+                        <div class="flex justify-between items-center mb-4 border-b pb-2">
+                            <h3 class="font-black text-green-600"><i class="fas fa-file-invoice"></i> الفواتير والدفعات</h3>
+                            <button onclick="openNewInvoice()" class="bg-green-100 text-green-700 px-3 py-1 rounded text-xs font-bold"><i class="fas fa-plus"></i> إصدار فاتورة</button>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm text-right"><tbody id="invoices-table" class="divide-y divide-slate-100 dark:divide-slate-700"></tbody></table></div>
+                    </div>
+                    <div class="glass-card p-5">
+                        <div class="flex justify-between items-center mb-4 border-b pb-2">
+                            <h3 class="font-black text-red-600"><i class="fas fa-money-bill-wave"></i> التكاليف والمصروفات</h3>
+                            <button onclick="openNewExpense()" class="bg-red-100 text-red-700 px-3 py-1 rounded text-xs font-bold"><i class="fas fa-plus"></i> تسجيل مصروف</button>
+                        </div>
+                        <div class="overflow-x-auto"><table class="w-full text-sm text-right"><tbody id="expenses-table" class="divide-y divide-slate-100 dark:divide-slate-700"></tbody></table></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <div id="modal-client" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 w-full max-w-lg rounded-2xl shadow-2xl p-6 border border-slate-200">
+            <h3 class="text-lg font-black mb-4 dark:text-white" id="client-modal-title">بيانات العميل</h3>
+            <form id="form-client" onsubmit="saveClient(event)" class="space-y-4">
+                <input type="hidden" id="c-id">
+                <div><label class="text-[10px] font-bold text-slate-500">اسم العميل/الشركة</label><input type="text" id="c-name" class="form-input" required></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-bold text-slate-500">رقم الموبايل</label><input type="tel" id="c-phone" class="form-input text-left" dir="ltr" required></div>
+                    <div><label class="text-[10px] font-bold text-slate-500">البريد الإلكتروني</label><input type="email" id="c-email" class="form-input text-left" dir="ltr"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-bold text-slate-500">النوع</label><select id="c-type" class="form-input"><option value="شركة">شركة</option><option value="فرد">فرد</option></select></div>
+                    <div><label class="text-[10px] font-bold text-slate-500">المصدر</label><select id="c-source" class="form-input"><option>SEO</option><option>Social Media</option><option>Referral</option><option>Other</option></select></div>
+                </div>
+                <div><label class="text-[10px] font-bold text-slate-500">الحالة</label>
+                    <select id="c-status" class="form-input"><option value="Lead">محتمل (Lead)</option><option value="Active">نشط (Active)</option><option value="Old">سابق (Old)</option><option value="Blacklist">قائمة سوداء</option></select>
+                </div>
+                <div class="flex gap-2 mt-4">
+                    <button type="submit" class="flex-1 bg-primary-600 text-white font-bold py-2 rounded-lg">حفظ</button>
+                    <button type="button" onclick="closeModal('modal-client')" class="bg-slate-200 text-slate-700 font-bold py-2 px-4 rounded-lg">إلغاء</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-project" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 w-full max-w-lg rounded-2xl p-6">
+            <h3 class="text-lg font-black mb-4 dark:text-white" id="project-modal-title">تفاصيل المشروع</h3>
+            <form id="form-project" onsubmit="saveProject(event)" class="space-y-4">
+                <input type="hidden" id="p-id">
+                <div><label class="text-[10px] font-bold text-slate-500">العميل المرتبط</label>
+                    <select id="p-client" class="form-input" required></select>
+                </div>
+                <div><label class="text-[10px] font-bold text-slate-500">اسم المشروع / الخدمة</label><input type="text" id="p-title" class="form-input" required></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-bold text-slate-500">قيمة التعاقد (الإيراد المتوقع)</label><input type="number" id="p-budget" class="form-input" required></div>
+                    <div><label class="text-[10px] font-bold text-slate-500">حالة المشروع</label>
+                        <select id="p-status" class="form-input"><option value="Pending">قيد الانتظار</option><option value="Progress">قيد التنفيذ</option><option value="Done">منتهي</option></select>
+                    </div>
+                </div>
+                <div class="flex gap-2"><button type="submit" class="flex-1 bg-primary-600 text-white font-bold py-2 rounded-lg">حفظ</button><button type="button" onclick="closeModal('modal-project')" class="bg-slate-200 text-slate-700 font-bold py-2 px-4 rounded-lg">إلغاء</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-assign-task" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 w-full max-w-lg rounded-2xl p-6 border-t-4 border-indigo-500">
+            <h3 class="text-lg font-black text-indigo-600 mb-4"><i class="fas fa-tasks"></i> إسناد مهمة للمشروع</h3>
+            <form id="form-assign-task" onsubmit="saveAssignedTask(event)" class="space-y-4">
+                <input type="hidden" id="task-proj-id">
+                <div><label class="text-[10px] font-bold text-slate-500">المشروع</label><input type="text" id="task-proj-title" class="form-input bg-slate-200 text-slate-500" readonly></div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[10px] font-bold text-slate-500">استدعاء موظف للتنفيذ</label>
+                        <select id="task-employee" class="form-input" required></select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-slate-500">تكلفة المهمة (تُخصم من أرباح المشروع)</label>
+                        <input type="number" id="task-cost" class="form-input" placeholder="0" min="0">
+                    </div>
+                </div>
+
+                <div><label class="text-[10px] font-bold text-slate-500">عنوان المهمة</label><input type="text" id="task-title" class="form-input" required></div>
+                <div><label class="text-[10px] font-bold text-slate-500">التفاصيل المطلوبة</label><textarea id="task-desc" class="form-input h-20" required></textarea></div>
+                
+                <div class="flex gap-2 mt-4">
+                    <button type="submit" class="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-lg shadow-lg hover:bg-indigo-700">إرسال للموظف وحفظ التكلفة</button>
+                    <button type="button" onclick="closeModal('modal-assign-task')" class="bg-slate-200 text-slate-700 font-bold py-2 px-4 rounded-lg">إلغاء</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-expense" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 w-full max-w-md rounded-2xl p-6 border-t-4 border-red-500">
+            <h3 class="text-lg font-black text-red-600 mb-4">تسجيل مصروف فعلي لمشروع</h3>
+            <form id="form-expense" onsubmit="saveExpense(event)" class="space-y-4">
+                <div><label class="text-[10px] font-bold">المشروع</label><select id="ex-project" class="form-input" required></select></div>
+                <div><label class="text-[10px] font-bold">المبلغ</label><input type="number" id="ex-amount" class="form-input" required></div>
+                <div><label class="text-[10px] font-bold">البيان (سبب الصرف)</label><input type="text" id="ex-desc" class="form-input" required></div>
+                <div class="flex gap-2"><button type="submit" class="flex-1 bg-red-600 text-white font-bold py-2 rounded-lg">تسجيل المصروف</button><button type="button" onclick="closeModal('modal-expense')" class="bg-slate-200 font-bold py-2 px-4 rounded-lg">إلغاء</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-invoice" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 w-full max-w-md rounded-2xl p-6 border-t-4 border-green-500">
+            <h3 class="text-lg font-black text-green-600 mb-4">إصدار فاتورة للعميل</h3>
+            <form id="form-invoice" onsubmit="saveInvoice(event)" class="space-y-4">
+                <div><label class="text-[10px] font-bold">المشروع المستحق</label><select id="inv-project" class="form-input" required></select></div>
+                <div><label class="text-[10px] font-bold">مبلغ الفاتورة</label><input type="number" id="inv-amount" class="form-input" required></div>
+                <div><label class="text-[10px] font-bold">الحالة</label><select id="inv-status" class="form-input"><option value="Unpaid">غير مدفوعة (آجل)</option><option value="Paid">مدفوعة (تم التحصيل)</option></select></div>
+                <div class="flex gap-2"><button type="submit" class="flex-1 bg-green-600 text-white font-bold py-2 rounded-lg">حفظ الفاتورة</button><button type="button" onclick="closeModal('modal-invoice')" class="bg-slate-200 font-bold py-2 px-4 rounded-lg">إلغاء</button></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = { apiKey: "AIzaSyCXyuT529aGwiS5j_RPxW_zEeAtkYc7JlM", authDomain: "almaster-b8c18.firebaseapp.com", projectId: "almaster-b8c18", storageBucket: "almaster-b8c18.firebasestorage.app", messagingSenderId: "884142036232", appId: "1:884142036232:web:eeb6677d988565653a08bd" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let currentUser = null, userProfile = null;
+        let allClients = [], allProjects = [], allExpenses = [], allInvoices = [], allUsers = [];
+
+        // 1. Auth & Init
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                currentUser = user;
+                const doc = await db.collection('users').doc(user.email.toLowerCase()).get();
+                if(doc.exists) {
+                    userProfile = doc.data();
+                    const canCRM = userProfile.role === 'admin' || (userProfile.permissions && userProfile.permissions.crm === true);
+                    if (!canCRM || userProfile.isSuspended) { window.location.replace('app.html'); return; }
+                    document.getElementById('sidebar-user-name').innerText = userProfile.name;
+                    document.getElementById('sidebar-user-role').innerText = userProfile.role;
+                    document.getElementById('sidebar-user-img').src = userProfile.photo || `https://ui-avatars.com/api/?background=0ea5e9&color=fff&name=${userProfile.name}`;
+                    document.getElementById('loader').classList.add('hidden');
+                    initDataListeners();
+                } else { window.location.replace('index.html'); }
+            } else { window.location.href = 'index.html'; }
+        });
+
+        // 2. Navigation & UI Helpers
+        function switchView(viewName) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById('nav-' + viewName).classList.add('active');
+            document.querySelectorAll('main > div > div[id^="view-"]').forEach(el => el.classList.add('hidden-view'));
+            document.getElementById('view-' + viewName).classList.remove('hidden-view');
+        }
+        function toggleDarkMode() { document.documentElement.classList.toggle('dark-mode'); }
+        function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        function openNewClient() {
+            document.getElementById('form-client').reset();
+            document.getElementById('c-id').value = ''; 
+            document.getElementById('client-modal-title').innerText = "إضافة عميل جديد";
+            openModal('modal-client');
+        }
+        
+        function openNewProject() {
+            document.getElementById('form-project').reset();
+            document.getElementById('p-id').value = '';
+            updateDropdowns(); 
+            document.getElementById('project-modal-title').innerText = "إضافة مشروع جديد";
+            openModal('modal-project');
+        }
+
+        function openNewExpense() { document.getElementById('form-expense').reset(); updateDropdowns(); openModal('modal-expense'); }
+        function openNewInvoice() { document.getElementById('form-invoice').reset(); updateDropdowns(); openModal('modal-invoice'); }
+
+        function generateCode(prefix) { return `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`; }
+
+        // 3. Real-time Database Listeners
+        function initDataListeners() {
+            db.collection('users').onSnapshot(snap => {
+                allUsers = snap.docs.map(d => ({ email: d.id, ...d.data() }));
+                renderProjects(); 
+            });
+
+            db.collection('clients').onSnapshot(snap => {
+                allClients = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                renderKanban(); updateDropdowns(); 
+            });
+
+            db.collection('projects').onSnapshot(snap => {
+                allProjects = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                renderProjects(); updateDropdowns(); calculateDashboard();
+            });
+
+            db.collection('expenses').onSnapshot(snap => {
+                allExpenses = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                renderFinancials(); calculateDashboard(); renderProjects(); 
+            });
+
+            db.collection('invoices').onSnapshot(snap => {
+                allInvoices = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                renderFinancials(); calculateDashboard();
+            });
+        }
+
+        // 4. Clients
+        async function saveClient(e) {
+            e.preventDefault();
+            const id = document.getElementById('c-id').value;
+            const data = {
+                name: document.getElementById('c-name').value,
+                phone: document.getElementById('c-phone').value,
+                email: document.getElementById('c-email').value,
+                type: document.getElementById('c-type').value,
+                source: document.getElementById('c-source').value,
+                status: document.getElementById('c-status').value,
+            };
+            if(id) {
+                await db.collection('clients').doc(id).update(data);
+            } else {
+                data.clientCode = generateCode('CUST');
+                data.timestamp = firebase.firestore.FieldValue.serverTimestamp();
+                data.addedBy = userProfile.name;
+                await db.collection('clients').add(data);
+            }
+            closeModal('modal-client');
+        }
+
+        function renderKanban() {
+            const cols = { 'Lead': 'kb-lead', 'Active': 'kb-active', 'Old': 'kb-old', 'Blacklist': 'kb-blacklist' };
+            Object.values(cols).forEach(id => document.getElementById(id).innerHTML = '');
+            
+            allClients.forEach(c => {
+                const targetCol = document.getElementById(cols[c.status]);
+                if(targetCol) {
+                    targetCol.innerHTML += `
+                        <div class="kanban-card cursor-pointer group relative" onclick="editClient('${c.id}')">
+                            <div class="flex justify-between mb-1"><span class="font-bold text-sm dark:text-white">${c.name}</span><span class="text-[9px] text-slate-400 font-mono">${c.clientCode}</span></div>
+                            <p class="text-xs text-slate-500 mb-2"><i class="fas fa-phone mr-1"></i> <span dir="ltr">${c.phone}</span></p>
+                            <span class="bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px] px-2 py-1 rounded">${c.type} | ${c.source}</span>
+                            <button onclick="event.stopPropagation(); deleteClient('${c.id}')" class="absolute top-2 left-2 text-red-500 opacity-0 group-hover:opacity-100 transition p-1"><i class="fas fa-trash text-xs"></i></button>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        function editClient(id) {
+            const c = allClients.find(x => x.id === id);
+            if(!c) return;
+            document.getElementById('form-client').reset();
+            document.getElementById('c-id').value = c.id;
+            document.getElementById('c-name').value = c.name;
+            document.getElementById('c-phone').value = c.phone;
+            document.getElementById('c-email').value = c.email || '';
+            document.getElementById('c-type').value = c.type;
+            document.getElementById('c-source').value = c.source;
+            document.getElementById('c-status').value = c.status;
+            document.getElementById('client-modal-title').innerText = "تعديل بيانات العميل";
+            openModal('modal-client');
+        }
+
+        async function deleteClient(id) {
+            if(confirm("تحذير: هل تريد مسح العميل نهائياً؟")) {
+                await db.collection('clients').doc(id).delete();
+            }
+        }
+
+        // 5. Projects & Task Assignment
+        function updateDropdowns() {
+            const cDrop = document.getElementById('p-client');
+            cDrop.innerHTML = '<option value="" disabled selected>-- اختر الشركة / العميل --</option>';
+            allClients.forEach(c => cDrop.innerHTML += `<option value="${c.id}">${c.name} (${c.type})</option>`);
+
+            const pDrops = [document.getElementById('ex-project'), document.getElementById('inv-project')];
+            pDrops.forEach(drop => {
+                drop.innerHTML = '<option value="" disabled selected>-- اختر المشروع --</option>';
+                allProjects.forEach(p => drop.innerHTML += `<option value="${p.id}">${p.title} (${p.clientName})</option>`);
+            });
+        }
+
+        async function saveProject(e) {
+            e.preventDefault();
+            const id = document.getElementById('p-id').value;
+            const clientId = document.getElementById('p-client').value;
+            const clientName = allClients.find(c => c.id === clientId)?.name || 'غير معروف';
+            
+            const data = {
+                clientId: clientId,
+                clientName: clientName,
+                title: document.getElementById('p-title').value,
+                budget: Number(document.getElementById('p-budget').value),
+                status: document.getElementById('p-status').value,
+            };
+
+            if(id) {
+                await db.collection('projects').doc(id).update(data);
+            } else {
+                data.projectCode = generateCode('PROJ');
+                data.timestamp = firebase.firestore.FieldValue.serverTimestamp();
+                data.createdBy = userProfile.name;
+                await db.collection('projects').add(data);
+            }
+            closeModal('modal-project');
+        }
+
+        function renderProjects() {
+            const list = document.getElementById('projects-list');
+            list.innerHTML = '';
+            
+            allProjects.forEach(p => {
+                const projExpenses = allExpenses.filter(e => e.projectId === p.id).reduce((sum, e) => sum + e.amount, 0);
+                const profit = p.budget - projExpenses;
+                const profitColor = profit >= 0 ? 'text-green-600' : 'text-red-600';
+                
+                let totalTasks = 0;
+                let doneTasks = 0;
+                allUsers.forEach(u => {
+                    if(u.tasks) {
+                        u.tasks.forEach(t => {
+                            if(t.projectId === p.id) {
+                                totalTasks++;
+                                if(t.status === 'done') doneTasks++;
+                            }
+                        });
+                    }
+                });
+                const progressPercentage = totalTasks === 0 ? 0 : Math.round((doneTasks / totalTasks) * 100);
+
+                list.innerHTML += `
+                    <div class="glass-card p-5 flex flex-col md:flex-row justify-between md:items-center gap-4 border-r-4 ${p.status==='Done'?'border-green-500':'border-primary-500'}">
+                        
+                        <div class="md:w-1/3 relative group">
+                            <button onclick="editProject('${p.id}')" class="absolute top-0 left-0 text-blue-500 opacity-0 group-hover:opacity-100 p-1"><i class="fas fa-pen text-sm"></i></button>
+                            <p class="text-[10px] text-slate-400 font-mono">${p.projectCode}</p>
+                            <h4 class="font-black text-lg dark:text-white">${p.title}</h4>
+                            <p class="text-xs text-primary-600 font-bold mb-2"><i class="fas fa-building mr-1"></i> ${p.clientName}</p>
+                            <span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full text-[10px] font-bold">${p.status}</span>
+                        </div>
+                        
+                        <div class="md:w-1/3 px-4 md:border-r md:border-l border-slate-100 dark:border-slate-700">
+                            <div class="flex justify-between text-[11px] font-bold text-slate-500 mb-1">
+                                <span>إنجاز المهام (${doneTasks}/${totalTasks})</span> <span class="text-primary-600">${progressPercentage}%</span>
+                            </div>
+                            <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2.5 mb-3 overflow-hidden">
+                                <div class="bg-primary-500 h-2.5 rounded-full transition-all duration-1000" style="width: ${progressPercentage}%"></div>
+                            </div>
+                            <button onclick="openAssignTask('${p.id}', '${p.title}')" class="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2">
+                                <i class="fas fa-user-plus"></i> إسناد مهمة لموظف
+                            </button>
+                        </div>
+
+                        <div class="md:w-1/3 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl text-sm border border-slate-100 dark:border-slate-700">
+                            <div class="flex justify-between mb-1.5"><span class="text-slate-500 font-bold text-xs">التعاقد (الإيراد):</span><span class="font-black dark:text-white">${p.budget.toLocaleString()} <span class="text-[9px]">ر.س</span></span></div>
+                            <div class="flex justify-between mb-1.5"><span class="text-slate-500 font-bold text-xs">إجمالي المصروفات:</span><span class="font-black text-red-500">${projExpenses.toLocaleString()} <span class="text-[9px]">ر.س</span></span></div>
+                            <div class="flex justify-between mt-2 pt-2 border-t border-slate-200 dark:border-slate-600"><span class="font-black text-slate-800 dark:text-slate-200">الربح الصافي:</span><span class="font-black text-lg ${profitColor}">${profit.toLocaleString()}</span></div>
+                        </div>
+
+                    </div>
+                `;
+            });
+        }
+
+        function editProject(id) {
+            const p = allProjects.find(x => x.id === id);
+            if(!p) return;
+            document.getElementById('form-project').reset();
+            document.getElementById('p-id').value = p.id;
+            document.getElementById('p-client').value = p.clientId;
+            document.getElementById('p-title').value = p.title;
+            document.getElementById('p-budget').value = p.budget;
+            document.getElementById('p-status').value = p.status;
+            document.getElementById('project-modal-title').innerText = "تعديل المشروع";
+            openModal('modal-project');
+        }
+
+        // --- نظام إسناد المهام المطور (بإضافة التكلفة) ---
+        function openAssignTask(projectId, projectTitle) {
+            document.getElementById('form-assign-task').reset();
+            document.getElementById('task-proj-id').value = projectId;
+            document.getElementById('task-proj-title').value = projectTitle;
+            
+            const empDrop = document.getElementById('task-employee');
+            empDrop.innerHTML = '<option value="" disabled selected>-- اختر الموظف --</option>';
+            allUsers.forEach(u => {
+                empDrop.innerHTML += `<option value="${u.email}">${u.name} (${u.role || 'موظف'})</option>`;
+            });
+            
+            openModal('modal-assign-task');
+        }
+
+        async function saveAssignedTask(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.innerText = 'جاري الإرسال...'; btn.disabled = true;
+
+            const projId = document.getElementById('task-proj-id').value;
+            const projTitle = document.getElementById('task-proj-title').value;
+            const targetEmail = document.getElementById('task-employee').value;
+            const taskTitle = document.getElementById('task-title').value;
+            const taskDesc = document.getElementById('task-desc').value;
+            const taskCost = Number(document.getElementById('task-cost').value) || 0; // سحب التكلفة
+
+            try {
+                // 1. إرسال المهمة للموظف عشان تظهرله في السيستم القديم
+                const userRef = db.collection('users').doc(targetEmail);
+                const doc = await userRef.get();
+                let employeeTasks = doc.data().tasks || [];
+                
+                // جلب اسم الموظف من إيميله
+                const empName = allUsers.find(u => u.email === targetEmail)?.name || 'الموظف';
+
+                employeeTasks.push({
+                    id: Date.now(),
+                    projectId: projId, 
+                    title: taskTitle,
+                    desc: taskDesc,
+                    status: 'started',
+                    ownerEmail: targetEmail,
+                    createdByEmail: currentUser.email,
+                    createdBy: userProfile.name,
+                    timestamp: Date.now()
+                });
+
+                await userRef.update({ tasks: employeeTasks });
+
+                // 2. السحر المالي: لو حطيت تكلفة للتاسك، هتتسجل كمصروف أوتوماتيك على المشروع!
+                if(taskCost > 0) {
+                    await db.collection('expenses').add({
+                        projectId: projId,
+                        projectName: projTitle,
+                        amount: taskCost,
+                        desc: `تكلفة مهمة (${taskTitle}) للموظف: ${empName}`,
+                        addedBy: userProfile.name,
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+
+                alert("تم إرسال المهمة بنجاح!" + (taskCost > 0 ? " وتم تسجيل تكلفتها على المشروع." : ""));
+                closeModal('modal-assign-task');
+            } catch(err) {
+                alert("حدث خطأ أثناء إسناد المهمة: " + err.message);
+            }
+            btn.innerText = 'إرسال للموظف وحفظ التكلفة'; btn.disabled = false;
+        }
+
+        // 6. Expenses & Invoices
+        async function saveExpense(e) {
+            e.preventDefault();
+            const projectId = document.getElementById('ex-project').value;
+            const projectName = allProjects.find(p => p.id === projectId)?.title || '';
+            await db.collection('expenses').add({
+                projectId, projectName,
+                amount: Number(document.getElementById('ex-amount').value),
+                desc: document.getElementById('ex-desc').value,
+                addedBy: userProfile.name,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            closeModal('modal-expense');
+        }
+
+        async function saveInvoice(e) {
+            e.preventDefault();
+            const projectId = document.getElementById('inv-project').value;
+            const projectName = allProjects.find(p => p.id === projectId)?.title || '';
+            await db.collection('invoices').add({
+                invoiceCode: generateCode('INV'),
+                projectId, projectName,
+                amount: Number(document.getElementById('inv-amount').value),
+                status: document.getElementById('inv-status').value,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            closeModal('modal-invoice');
+        }
+
+        function renderFinancials() {
+            const expTable = document.getElementById('expenses-table');
+            expTable.innerHTML = '';
+            allExpenses.forEach(e => {
+                const time = e.timestamp ? moment(e.timestamp.toDate()).format('YYYY-MM-DD') : 'الآن';
+                expTable.innerHTML += `<tr class="hover:bg-slate-50 dark:hover:bg-slate-800 transition"><td class="p-3 text-[10px] text-slate-400 font-mono">${time}</td><td class="p-3 font-bold text-slate-700 dark:text-slate-200">${e.projectName}</td><td class="p-3 text-xs text-slate-500">${e.desc}</td><td class="p-3 font-black text-red-500">${e.amount.toLocaleString()}</td></tr>`;
+            });
+
+            const invTable = document.getElementById('invoices-table');
+            invTable.innerHTML = '';
+            allInvoices.forEach(i => {
+                const time = i.timestamp ? moment(i.timestamp.toDate()).format('YYYY-MM-DD') : 'الآن';
+                const badge = i.status === 'Paid' ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-[10px] font-bold">مُحصلة</span>' : '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-[10px] font-bold">آجلة</span>';
+                invTable.innerHTML += `<tr class="hover:bg-slate-50 dark:hover:bg-slate-800 transition"><td class="p-3 text-[10px] text-slate-400 font-mono">${time}</td><td class="p-3 font-bold text-slate-700 dark:text-slate-200">${i.invoiceCode}</td><td class="p-3 font-bold text-primary-600">${i.projectName}</td><td class="p-3 font-black">${i.amount.toLocaleString()}</td><td class="p-3">${badge}</td></tr>`;
+            });
+        }
+
+        // 7. Dashboard Calculation
+        function calculateDashboard() {
+            const openProjects = allProjects.filter(p => p.status !== 'Done').length;
+            document.getElementById('dash-projects').innerText = openProjects;
+
+            const totalRevenue = allProjects.reduce((sum, p) => sum + (Number(p.budget) || 0), 0);
+            const totalExpenses = allExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+            const totalProfit = totalRevenue - totalExpenses;
+
+            document.getElementById('dash-revenue').innerHTML = `${totalRevenue.toLocaleString()} <span class="text-sm font-normal text-slate-400">ر.س</span>`;
+            document.getElementById('dash-expenses').innerHTML = `${totalExpenses.toLocaleString()} <span class="text-sm font-normal text-slate-400">ر.س</span>`;
+            document.getElementById('dash-profit').innerHTML = `${totalProfit.toLocaleString()} <span class="text-sm font-normal text-slate-400">ر.س</span>`;
+            
+            const pEl = document.getElementById('dash-profit');
+            if(totalProfit < 0) { pEl.classList.replace('text-primary-600', 'text-red-600'); }
+            else { pEl.classList.replace('text-red-600', 'text-primary-600'); }
+        }
+
+        window.onload = () => switchView('dashboard');
+    </script>
+</body>
+</html>

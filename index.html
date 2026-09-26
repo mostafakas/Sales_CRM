@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AL MASTER | تسجيل الدخول</title>
+  <meta name="theme-color" content="#0a0f3d">
+  <meta name="description" content="AL MASTER — بوابة الموظفين والموارد البشرية">
+  <link rel="icon" href="assets/img/favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/img/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script>
+    (function () {
+      try {
+        var l = localStorage.getItem('am_lang') || 'ar';
+        document.documentElement.lang = l; document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+        var t = localStorage.getItem('am_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="auth">
+    <section class="auth-art" aria-hidden="true">
+      <img class="mark-bg" src="assets/img/logo-mark-white.png" alt="">
+      <img src="assets/img/logo-white.png" alt="AL MASTER" style="height:30px;width:auto">
+      <div>
+        <span class="pill"><i class="fas fa-shield-halved"></i> <span data-t="pill"></span></span>
+        <h1 class="mt-16" data-t="headline"></h1>
+        <p data-t="tagline"></p>
+      </div>
+      <div class="row gap-24" style="color:var(--on-navy-muted);font-size:13px">
+        <span><i class="fas fa-location-dot"></i>&nbsp; <span data-t="city"></span></span>
+        <span><i class="fas fa-globe"></i>&nbsp; almaster.tech</span>
+      </div>
+    </section>
+
+    <section class="auth-form">
+      <div class="auth-top">
+        <button class="btn btn-ghost btn-icon" id="theme-btn" aria-label="Theme"><i class="fas fa-moon"></i></button>
+        <button class="btn btn-ghost btn-sm" id="lang-btn" style="font-weight:800">EN</button>
+      </div>
+
+      <div class="auth-card" id="login-view">
+        <img class="auth-mobile-logo" src="assets/img/logo-full.png" alt="AL MASTER">
+        <h2 data-t="welcome"></h2>
+        <p class="sub" data-t="welcomeSub"></p>
+        <div id="reason" class="alert warn hidden mb-16"></div>
+        <form id="login-form" class="col gap-16" novalidate>
+          <div class="field">
+            <label for="email" data-t="email"></label>
+            <input class="input" id="email" type="email" autocomplete="username" required dir="ltr" style="height:48px">
+          </div>
+          <div class="field">
+            <div class="row between"><label for="password" data-t="password"></label><a href="#" id="forgot-link" class="small bold" data-t="forgot"></a></div>
+            <div class="input-group">
+              <input class="input" id="password" type="password" autocomplete="current-password" required dir="ltr" style="height:48px">
+              <button type="button" class="btn btn-ghost" id="toggle-pw" aria-label="Show password"><i class="fas fa-eye"></i></button>
+            </div>
+          </div>
+          <div id="login-error" class="alert bad hidden" role="alert"></div>
+          <button class="btn btn-grad btn-lg btn-block" id="login-btn" type="submit"><span data-t="signin"></span></button>
+        </form>
+        <p class="small faint mt-24" style="text-align:center" data-t="help"></p>
+      </div>
+
+      <div class="auth-card hidden" id="reset-view">
+        <button class="btn btn-ghost btn-sm mb-16" id="back-link"><i class="fas fa-arrow-right" data-flip></i> <span data-t="back"></span></button>
+        <h2 data-t="resetTitle"></h2>
+        <p class="sub" data-t="resetSub"></p>
+        <form id="reset-form" class="col gap-16" novalidate>
+          <div class="field"><label for="reset-email" data-t="email"></label><input class="input" id="reset-email" type="email" required dir="ltr" style="height:48px"></div>
+          <div id="reset-msg" class="alert hidden" role="status"></div>
+          <button class="btn btn-primary btn-lg btn-block" id="reset-btn" type="submit"><span data-t="sendLink"></span></button>
+        </form>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="assets/js/login.js"></script>
+</body>
+</html>

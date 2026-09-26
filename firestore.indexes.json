@@ -1,0 +1,10 @@
+{
+  "indexes": [
+    { "collectionGroup": "attendance_days", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "email", "order": "ASCENDING" }, { "fieldPath": "date", "order": "ASCENDING" } ] },
+    { "collectionGroup": "attendance_days", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "leaderEmail", "order": "ASCENDING" }, { "fieldPath": "date", "order": "ASCENDING" } ] },
+    { "collectionGroup": "attendance_days", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "email", "order": "ASCENDING" }, { "fieldPath": "leaderEmail", "order": "ASCENDING" }, { "fieldPath": "date", "order": "ASCENDING" } ] },
+    { "collectionGroup": "requests", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "leaderEmail", "order": "ASCENDING" }, { "fieldPath": "startDate", "order": "ASCENDING" } ] },
+    { "collectionGroup": "requests", "queryScope": "COLLECTION", "fields": [ { "fieldPath": "email", "order": "ASCENDING" }, { "fieldPath": "startDate", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

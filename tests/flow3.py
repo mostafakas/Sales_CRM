@@ -1,0 +1,20 @@
+import sys; sys.path.insert(0, '/home/claude/almaster-hr/tests')
+from harness import App, seed_payload
+p = seed_payload({'settings/general': {'weekend': [5], 'trackingStart': '2026-09-01'}})
+a = App(); a.seed(p); pg = a.page
+def step(n):
+    e = a.dump_errors(n); print('OK' if not e else 'ERR', n)
+a.login('emp1@almaster.tech')
+pg.click('[data-rq="leave"]'); pg.wait_for_timeout(300); pg.fill('[name=startDate]', '2026-10-05'); pg.fill('[name=endDate]', '2026-10-06'); pg.click('#rq-send'); pg.wait_for_timeout(900)
+pg.click('[data-rq="correction"]'); pg.wait_for_timeout(300); pg.fill('[name=date]', '2026-09-24'); pg.fill('[name=checkIn]', '09:05'); pg.fill('[name=checkOut]', '17:00'); pg.fill('[name=reason]', 'النت فصل'); pg.click('#rq-send'); pg.wait_for_timeout(900); step('submit')
+a.login('leader@almaster.tech'); a.go('#/approvals'); pg.wait_for_timeout(700)
+for i in range(pg.locator('[data-action=approve]').count()): pg.locator('[data-action=approve]').first.click(); pg.wait_for_timeout(1000)
+a.login('hr@almaster.tech'); a.go('#/approvals'); pg.wait_for_timeout(700)
+for i in range(pg.locator('[data-action=approve]').count()): pg.locator('[data-action=approve]').first.click(); pg.wait_for_timeout(1200)
+step('approve all')
+print('  used after approve:', a.db('balances/emp1@almaster.tech_2026')['types']['annual']['used'])
+print('  correction applied:', {k: v for k, v in (a.db('attendance_days/emp1@almaster.tech_2026-09-24') or {}).items() if k in ('corrected','workMs','checkInMs')})
+pg.click('#tabs .tab[data-t=history]'); pg.wait_for_timeout(900); a.shot('95-history')
+pg.locator('[data-action=revoke]').first.click(); pg.wait_for_timeout(300); pg.fill('.modal [data-inp]', 'تغيير خطة'); pg.click('.modal [data-yes]'); pg.wait_for_timeout(1200); step('revoke')
+print('  used after revoke:', a.db('balances/emp1@almaster.tech_2026')['types']['annual']['used'], '| sched days:', list((a.db('schedules/emp1@almaster.tech_2026-10') or {}).get('days', {}).keys()))
+a.close()

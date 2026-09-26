@@ -1,0 +1,247 @@
+rules_version = '2';
+// AL MASTER HR — Firestore security rules.
+// Roles live on users/{email}.role: employee | leader | hr | finance | admin  (legacy "supervisor" = hr).
+// Deploy with:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- identity ----------
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function me() { return request.auth.token.email.lower(); }
+    function uPath(email) { return /databases/$(database)/documents/users/$(email); }
+    function hasProfile() { return signedIn() && exists(uPath(me())); }
+    function prof() { return get(uPath(me())).data; }
+    function active() { return hasProfile() && prof().get('isSuspended', false) != true; }
+    function role() { return prof().get('role', 'employee'); }
+    function isAdmin() { return active() && role() == 'admin'; }
+    function isHR() { return active() && role() in ['hr', 'supervisor', 'admin']; }
+    function isFinance() { return active() && (role() in ['finance', 'admin'] || prof().get('permissions', {}).get('payroll', false) == true); }
+    function hasCRM() { return active() && (role() == 'admin' || prof().get('permissions', {}).get('crm', false) == true); }
+    function leads(email) { return exists(uPath(email)) && get(uPath(email)).data.get('leaderEmail', '') == me(); }
+
+    // ---------- helpers ----------
+    function affected() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function onlyChanged(keys) { return affected().hasOnly(keys); }
+    function nowMs() { return request.time.toMillis(); }
+    function near(ms) { return ms is number && ms >= nowMs() - 300000 && ms <= nowMs() + 300000; }
+    function settingsPath() { return /databases/$(database)/documents/settings/general; }
+    function defaultWf(t) {
+      return t == 'letter' ? ['hr'] : ((t == 'leave' || t == 'correction') ? ['leader', 'hr'] : (t == 'advance' ? ['leader', 'hr', 'finance'] : ['leader']));
+    }
+    function wfList(t) { return exists(settingsPath()) ? get(settingsPath()).data.get('workflow', {}).get(t, defaultWf(t)) : defaultWf(t); }
+    // the first approval stage the requester must go through
+    function firstStatusOk(d) {
+      return (prof().get('leaderEmail', '') != '' && wfList(d.type).hasAny(['leader']))
+        ? d.status == 'pending_leader'
+        : d.status in (d.type == 'advance' ? ['pending_hr', 'pending_finance'] : ['pending_hr']);
+    }
+    // a check-in must happen on the work day it is filed under (Cairo day, generous window)
+    function dayWindowOk(d) {
+      let p = d.split('-');
+      let t0 = timestamp.date(int(p[0]), int(p[1]), int(p[2]));
+      return request.time > t0 - duration.value(4, 'h') && request.time < t0 + duration.value(32, 'h');
+    }
+    function workSum(d) { return d.get('workMs', 0) + d.get('breakMs', 0) + d.get('meetingMs', 0); }
+    function tbSum(m) { return m.get('Online', 0) + m.get('Break', 0) + m.get('Meeting', 0); }
+    function timeBankOk() {
+      return !('timeBank' in affected())
+        || ('lastChange' in affected() && (
+             // a new work day starts from zero
+             (request.resource.data.get('dayKey', '') != resource.data.get('dayKey', '') && tbSum(request.resource.data.timeBank) == 0)
+             // legacy docs without a server timestamp
+             || !(resource.data.get('lastChange', null) is timestamp)
+             // same day: counters can grow at most by the real elapsed time (+2 min tolerance)
+             || (request.resource.data.get('dayKey', '') == resource.data.get('dayKey', '')
+                 && tbSum(request.resource.data.timeBank) >= 0
+                 && tbSum(request.resource.data.timeBank) <= tbSum(resource.data.get('timeBank', {})) + (nowMs() - resource.data.lastChange.toMillis()) + 120000)
+           ));
+    }
+
+    // ---------- users (public profile + live status) ----------
+    match /users/{email} {
+      allow get: if (signedIn() && email == me()) || active();
+      allow list: if active();
+      allow create: if isHR() && (request.resource.data.get('role', '') != 'admin' || isAdmin());
+      allow delete: if isAdmin();
+
+      // HR / admin: anything, but only admins touch admin accounts or grant admin
+      allow update: if isHR()
+        && ((resource.data.get('role', '') != 'admin' && request.resource.data.get('role', '') != 'admin') || isAdmin());
+
+      // A leader may clear the "remote pending" flag for a team member
+      allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending']);
+
+      // Self-service: live attendance fields only, with server-verified clock and bounded time
+      allow update: if signedIn() && email == me()
+        && resource.data.get('isSuspended', false) != true
+        && onlyChanged(['status', 'lastChange', 'lastChangeClient', 'timeBank', 'firstOnlineAt', 'dayKey', 'workLocation',
+                        'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword'])
+        && (!('status' in affected()) || request.resource.data.status in ['Online', 'Break', 'Meeting', 'Offline'])
+        && (!('lastChange' in affected()) || request.resource.data.lastChange == request.time)
+        && (!('lastLoginAt' in affected()) || request.resource.data.lastLoginAt == request.time)
+        && (!('firstOnlineAt' in affected()) || request.resource.data.firstOnlineAt == request.time || request.resource.data.firstOnlineAt == null)
+        && (!('mustChangePassword' in affected()) || request.resource.data.mustChangePassword == false)
+        && (!('photo' in affected()) || request.resource.data.photo.size() < 120000)
+        && timeBankOk();
+    }
+
+    // ---------- salary, bank, contract (restricted) ----------
+    match /employees_private/{email} {
+      allow get: if signedIn() && email == me();
+      allow read: if isHR() || isFinance();
+      allow write: if isHR() || isFinance();
+    }
+
+    // ---------- settings ----------
+    match /settings/{doc} {
+      allow read: if active();
+      allow write: if isHR();
+    }
+    match /_clock/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ---------- attendance ----------
+    match /attendance_days/{id} {
+      function selfKeys() {
+        return ['email', 'name', 'date', 'leaderEmail', 'department', 'mode', 'remotePending', 'checkIn', 'checkInMs', 'checkOutMs',
+                'workMs', 'breakMs', 'meetingMs', 'closed', 'closedBy', 'autoClosed', 'corrected', 'updatedAt'];
+      }
+      function checkOutOk(d) {
+        return d.get('checkOutMs', null) == null
+          || (d.checkOutMs <= nowMs() + 300000 && (d.get('autoClosed', false) == true || d.checkOutMs >= nowMs() - 300000));
+      }
+      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow write: if isHR();
+      // self create (start of day, or closing a forgotten day)
+      allow create: if active() && request.resource.data.email == me() && id == me() + '_' + request.resource.data.date
+        && request.resource.data.keys().hasOnly(selfKeys())
+        && request.resource.data.get('corrected', false) == false
+        && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
+        && (!('checkIn' in request.resource.data) || (request.resource.data.checkIn == request.time && dayWindowOk(request.resource.data.date)))
+        && (!('checkInMs' in request.resource.data) || near(request.resource.data.checkInMs))
+        && checkOutOk(request.resource.data);
+      // self update (status changes, end of day)
+      allow update: if active() && resource.data.email == me() && request.resource.data.email == me()
+        && onlyChanged(['workMs', 'breakMs', 'meetingMs', 'checkOutMs', 'closed', 'closedBy', 'autoClosed', 'updatedAt', 'remotePending'])
+        && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
+        && (!('remotePending' in affected()) || request.resource.data.remotePending == true)
+        && workSum(request.resource.data) <= nowMs() - resource.data.get('checkInMs', 0) + 300000
+        && checkOutOk(request.resource.data);
+      // self first check-in on a day doc that exists without one (pre-created by HR or migration)
+      allow update: if active() && resource.data.email == me() && request.resource.data.email == me()
+        && resource.data.get('checkIn', null) == null && resource.data.get('corrected', false) == false
+        && onlyChanged(selfKeys())
+        && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
+        && (!('checkIn' in affected()) || (request.resource.data.checkIn == request.time && dayWindowOk(request.resource.data.date)))
+        && (!('checkInMs' in affected()) || near(request.resource.data.checkInMs))
+        && checkOutOk(request.resource.data);
+      // leader clears "remote pending" after approving
+      allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending', 'updatedAt']) && request.resource.data.remotePending == false;
+    }
+    match /logs/{id} {
+      allow read: if active() && (resource.data.user == me() || isHR() || resource.data.get('leaderEmail', '') == me());
+      allow create: if active() && (request.resource.data.user == me() || isHR()) && request.resource.data.timestamp == request.time;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+    match /schedules/{id} {
+      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow write: if isHR() || (active() && leads(request.resource.data.email) && request.resource.data.get('leaderEmail', '') == me());
+    }
+
+    // ---------- requests ----------
+    match /requests/{id} {
+      function stageFields() { return ['status', 'updatedAt', 'history', 'decidedBy', 'approvedBy', 'approvedAt']; }
+      allow read: if active() && (resource.data.email == me() || resource.data.get('leaderEmail', '') == me() || isHR() || isFinance());
+      allow create: if isHR() || (active()
+        && request.resource.data.email == me()
+        && request.resource.data.get('leaderEmail', '') == prof().get('leaderEmail', '')
+        && request.resource.data.type in ['leave', 'remote', 'excuse', 'mission', 'correction', 'advance', 'letter']
+        && firstStatusOk(request.resource.data));
+      // requester cancels while pending
+      allow update: if active() && resource.data.email == me() && resource.data.status.matches('pending_.*')
+        && request.resource.data.status == 'cancelled' && onlyChanged(['status', 'updatedAt', 'history']);
+      // direct manager decides the leader stage (never their own request)
+      allow update: if active() && resource.data.get('leaderEmail', '') == me() && resource.data.email != me()
+        && resource.data.status == 'pending_leader'
+        && request.resource.data.status in ['pending_hr', 'pending_finance', 'approved', 'rejected']
+        && onlyChanged(stageFields());
+      // finance decides the finance stage
+      allow update: if isFinance() && resource.data.email != me() && resource.data.status == 'pending_finance'
+        && request.resource.data.status in ['approved', 'rejected'] && onlyChanged(stageFields());
+      // HR: any decision, revoke, response (own requests only for admins)
+      allow update: if isHR() && (resource.data.email != me() || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /attachments/{id} {
+      allow read: if active() && (resource.data.owner == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow create: if active() && request.resource.data.owner == me() && request.resource.data.data is string && request.resource.data.data.size() < 1000000;
+      allow delete: if active() && (resource.data.owner == me() || isHR());
+    }
+
+    // ---------- leave balances ----------
+    match /balances/{id} {
+      allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || leads(resource.data.email));
+      allow write: if isHR();
+    }
+    match /balance_ledger/{id} {
+      allow read: if active() && (resource.data.email == me() || isHR() || isFinance());
+      allow create: if isHR();
+    }
+
+    // ---------- money ----------
+    match /advances/{id} {
+      allow read: if active() && (resource.data.email == me() || isHR() || isFinance());
+      allow write: if isHR() || isFinance();
+    }
+    match /payroll_runs/{month} {
+      allow read: if isHR() || isFinance();
+      allow write: if isFinance();
+    }
+    match /payroll_items/{id} {
+      allow read: if isFinance() || isHR() || (active() && resource.data.email == me() && resource.data.published == true);
+      allow write: if isFinance();
+    }
+    match /treasury/{id} {
+      allow read, write: if isFinance();
+    }
+
+    // ---------- reports, notifications, audit ----------
+    match /monthly_reports/{month} {
+      allow read: if isHR() || isFinance();
+      allow write: if isHR();
+    }
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.to == me();
+      allow create: if active() && request.resource.data.from == me() && request.resource.data.to is string;
+      allow update: if signedIn() && resource.data.to == me() && onlyChanged(['read']);
+      allow delete: if signedIn() && resource.data.to == me();
+    }
+    match /audit_log/{id} {
+      allow read: if isHR();
+      allow create: if (isHR() || isFinance()) && request.resource.data.by == me();
+    }
+
+    // ---------- CRM / sales apps ----------
+    match /sales_leads/{id} { allow read, write: if hasCRM(); }
+    match /crm_settings/{id} { allow read, write: if hasCRM(); }
+    match /clients/{id} { allow read, write: if hasCRM(); }
+    match /projects/{id} { allow read, write: if hasCRM(); }
+    match /expenses/{id} { allow read, write: if hasCRM(); }
+    match /invoices/{id} { allow read, write: if hasCRM(); }
+
+    // ---------- old system (read-only, kept for the migration) ----------
+    match /system_settings/{doc} { allow read: if active(); allow write: if false; }
+    match /hr_stats/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /leave_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /monthly_schedules/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /financial_months/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /attendance_override/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /work_mode_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /attendance_records/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /_serverTime/{doc} { allow read, write: if false; }
+
+    // everything else: denied
+  }
+}

@@ -1,0 +1,12 @@
+import sys; sys.path.insert(0, '/home/claude/almaster-hr/tests')
+from harness import App, seed_payload
+a = App()
+a.seed(seed_payload())
+a.page.goto('http://localhost:8765/index.html'); a.page.wait_for_timeout(700); a.shot('01-login')
+a.login('emp1@almaster.tech'); a.page.wait_for_timeout(800); a.shot('02-home')
+a.dump_errors('home')
+a.page.click('#start-btn'); a.page.wait_for_timeout(300); a.shot('03-start-modal')
+a.page.click('[data-mode="office"]'); a.page.wait_for_timeout(1500); a.shot('04-started')
+a.dump_errors('start')
+print('user:', {k: v for k, v in a.db('users/emp1@almaster.tech').items() if k in ('status','dayKey','workLocation','timeBank')})
+a.close()

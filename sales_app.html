@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ALMASTER - CRM Dashboard</title>
+    <link rel="icon" type="image/png" href="icon-192.png">
+    
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Outfit', 'IBM Plex Sans Arabic', 'sans-serif'] },
+                    colors: {
+                        almaster: {
+                            navy: '#0a0f3d',
+                            navyLt: '#121a52',
+                            royal: '#1b1bdb',
+                            royalLt: '#5a5aff',
+                            gold: '#fbbf24'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        /* Custom scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 10px; }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #2563eb; }
+
+        /* General Styles */
+        body { background-color: #f8fafc; }
+        html.dark body { background-color: #050b1a; } /* Deep dark background */
+        
+        .crm-table { border-collapse: collapse; width: 100%; text-align: left; }
+        .crm-table th, .crm-table td { 
+            border-bottom: 1px solid theme('colors.slate.200'); 
+            padding: 12px 16px; 
+            white-space: nowrap; 
+        }
+        .crm-table th { color: theme('colors.slate.500'); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;}
+        .crm-table td { font-size: 14px; color: theme('colors.slate.700'); }
+        .crm-table tr:hover { background-color: theme('colors.slate.50'); }
+
+        html.dark .crm-table th, html.dark .crm-table td { border-bottom-color: theme('colors.slate.700/50'); }
+        html.dark .crm-table th { color: theme('colors.slate.400'); }
+        html.dark .crm-table td { color: theme('colors.slate.300'); }
+        html.dark .crm-table tr:hover { background-color: theme('colors.slate.800/40'); }
+        
+        .chip { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-flex; items-center: center; gap: 4px; }
+        
+        /* Drawer Transition */
+        .drawer { transition: transform 0.3s ease-in-out; transform: translateX(100%); }
+        .drawer.open { transform: translateX(0); }
+        
+        /* Kanban Styles */
+        .kanban-col { min-height: 400px; }
+        .sortable-ghost { opacity: 0.4; background-color: theme('colors.slate.200'); border: 2px dashed theme('colors.blue.400'); }
+        html.dark .sortable-ghost { background-color: theme('colors.slate.800'); }
+
+        /* Hide elements dynamically */
+        .spa-view { display: none; }
+        .spa-view.active { display: flex; }
+        
+        /* Skeleton Animation */
+        @keyframes skeleton-loading {
+            0% { background-color: #e2e8f0; }
+            100% { background-color: #cbd5e1; }
+        }
+        html.dark @keyframes skeleton-loading {
+            0% { background-color: #1e293b; }
+            100% { background-color: #334155; }
+        }
+        .skeleton { animation: skeleton-loading 1s linear infinite alternate; border-radius: 4px; }
+    </style>
+    <link rel="icon" href="assets/img/favicon.png">
+</head>
+<body class="text-slate-800 dark:text-slate-200 transition-colors duration-200 h-screen flex overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white dark:bg-almaster-navy border-r border-slate-200 dark:border-slate-800 flex flex-col z-20 shrink-0 shadow-lg">
+        <div class="h-20 flex items-center gap-3 px-6 border-b border-slate-100 dark:border-slate-800/50">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-almaster-royal to-almaster-royalLt flex items-center justify-center text-white shadow-lg">
+                <i class="fas fa-fire-flame-curved text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-black tracking-tight text-slate-900 dark:text-white leading-tight">ALMASTER</h1>
+                <p class="text-[10px] text-almaster-royalLt font-bold uppercase tracking-widest">Sales CRM</p>
+            </div>
+        </div>
+        
+        <nav class="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
+            <button onclick="navigate('leads')" id="nav-leads" class="nav-link w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-almaster-royal dark:hover:text-white transition-all group">
+                <div class="flex items-center gap-3"><i class="fas fa-users w-5 text-center group-hover:scale-110 transition-transform"></i> Leads</div>
+                <span id="leads-badge" class="bg-almaster-royal/10 text-almaster-royal px-2 py-0.5 rounded-full text-xs hidden">0</span>
+            </button>
+            <button onclick="navigate('customers')" id="nav-customers" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-almaster-royal dark:hover:text-white transition-all group">
+                <i class="fas fa-handshake w-5 text-center group-hover:scale-110 transition-transform"></i> Customers
+            </button>
+            <button onclick="navigate('analytics')" id="nav-analytics" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-almaster-royal dark:hover:text-white transition-all group">
+                <i class="fas fa-chart-line w-5 text-center group-hover:scale-110 transition-transform"></i> Analytics
+            </button>
+            <button onclick="navigate('reports')" id="nav-reports" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-almaster-royal dark:hover:text-white transition-all group">
+                <i class="fas fa-file-invoice w-5 text-center group-hover:scale-110 transition-transform"></i> Reports
+            </button>
+            
+            <div class="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800" id="admin-nav-section" style="display: none;">
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2 px-4">Administration</p>
+                <button onclick="navigate('settings')" id="nav-settings" class="nav-link w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all group">
+                    <i class="fas fa-sliders-h w-5 text-center group-hover:rotate-90 transition-transform"></i> CRM Settings
+                </button>
+            </div>
+        </nav>
+        
+        <div class="p-4">
+            <button onclick="window.location.href='index.html'" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-bold transition-all text-slate-700 dark:text-slate-300">
+                <i class="fas fa-door-open"></i> Exit to Main System
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 relative">
+        <!-- Header -->
+        <header class="h-20 bg-white/80 dark:bg-almaster-navy/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-8 shrink-0 sticky top-0 z-10">
+            <div class="flex items-center gap-6">
+                <h2 id="page-title" class="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Dashboard</h2>
+                
+                <!-- Quick Actions (Hidden in some views) -->
+                <div id="header-actions" class="hidden items-center gap-2">
+                    <button onclick="openLeadModal()" class="px-4 py-2 bg-gradient-to-r from-almaster-royal to-almaster-royalLt hover:from-almaster-royalLt hover:to-blue-400 text-white rounded-lg text-sm font-bold shadow-md shadow-blue-500/20 transition-all flex items-center gap-2 transform hover:-translate-y-0.5">
+                        <i class="fas fa-plus"></i> New Lead
+                    </button>
+                    <!-- View toggles for Leads -->
+                    <div id="view-toggles" class="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
+                        <button onclick="setLeadsView('table')" id="btn-view-table" class="px-3 py-1.5 rounded text-sm font-bold bg-white dark:bg-slate-700 text-almaster-royal shadow-sm"><i class="fas fa-list"></i></button>
+                        <button onclick="setLeadsView('kanban')" id="btn-view-kanban" class="px-3 py-1.5 rounded text-sm font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white"><i class="fas fa-columns"></i></button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-5">
+                <button onclick="toggleTheme()" class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-almaster-royal dark:hover:text-white transition-colors">
+                    <i id="theme-icon" class="fas fa-sun text-lg"></i>
+                </button>
+                
+                <div class="h-8 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                <div class="flex items-center gap-3 cursor-pointer group">
+                    <div class="text-right">
+                        <p id="user-name" class="text-sm font-bold text-slate-800 dark:text-white group-hover:text-almaster-royal transition-colors">Loading...</p>
+                        <p id="user-role" class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Authentication</p>
+                    </div>
+                    <div class="relative">
+                        <img id="user-avatar" src="" class="w-10 h-10 rounded-full object-cover bg-slate-200 dark:bg-slate-800 border-2 border-white dark:border-slate-700 shadow-sm" onerror="this.src='https://ui-avatars.com/api/?name=User&background=random'">
+                        <div class="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-almaster-navy rounded-full"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- SPA Views Container -->
+        <div class="flex-1 overflow-auto custom-scrollbar p-6 lg:p-8" id="spa-container">
+            <!-- Loader -->
+            <div id="global-loader" class="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
+                <i class="fas fa-circle-notch fa-spin text-4xl text-almaster-royal"></i>
+                <p class="font-bold animate-pulse">Initializing CRM Workspace...</p>
+            </div>
+
+            <!-- VIEW: LEADS -->
+            <div id="view-leads" class="spa-view flex-col h-full gap-4">
+                
+                <!-- Filters & Search -->
+                <div class="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700/50 shrink-0">
+                    <div class="relative w-full md:w-96">
+                        <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                        <input type="text" id="leads-search" placeholder="Search leads by name, company, or phone..." onkeyup="filterLeads()" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white rounded-xl pl-10 pr-4 py-2.5 text-sm focus:border-almaster-royal focus:ring-1 focus:ring-almaster-royal outline-none transition-all">
+                    </div>
+                    <div class="flex items-center gap-2" id="quick-filters">
+                        <button onclick="setQuickFilter('all')" class="quick-filter-btn active px-4 py-2 rounded-lg text-sm font-bold bg-almaster-royal/10 text-almaster-royal">All</button>
+                        <button onclick="setQuickFilter('New')" class="quick-filter-btn px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">New</button>
+                        <button onclick="setQuickFilter('Negotiation')" class="quick-filter-btn px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700">Negotiation</button>
+                    </div>
+                </div>
+
+                <!-- Table View -->
+                <div id="leads-table-container" class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl overflow-auto custom-scrollbar flex-1 shadow-sm relative">
+                    <table class="crm-table w-full">
+                        <thead class="bg-slate-50 dark:bg-slate-800/80 sticky top-0 z-10 backdrop-blur-sm">
+                            <tr>
+                                <th>Client / Company</th>
+                                <th>Contact Info</th>
+                                <th>Status</th>
+                                <th>Value</th>
+                                <th>Assigned To</th>
+                                <th>Last Action</th>
+                                <th class="text-center"><i class="fas fa-cog"></i></th>
+                            </tr>
+                        </thead>
+                        <tbody id="leads-table-body">
+                            <!-- JS Populated -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Kanban View (Hidden by default) -->
+                <div id="leads-kanban-container" class="hidden flex-1 flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                    <!-- Columns injected by JS -->
+                </div>
+            </div>
+
+            <!-- VIEW: CUSTOMERS -->
+            <div id="view-customers" class="spa-view flex-col h-full gap-4">
+                <div class="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700/50 shrink-0">
+                    <div class="relative w-full md:w-96">
+                        <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                        <input type="text" id="customers-search" placeholder="Search customers..." onkeyup="filterCustomers()" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white rounded-xl pl-10 pr-4 py-2.5 text-sm focus:border-almaster-royal focus:ring-1 focus:ring-almaster-royal outline-none transition-all">
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl overflow-auto custom-scrollbar flex-1 shadow-sm relative">
+                    <table class="crm-table w-full">
+                        <thead class="bg-slate-50 dark:bg-slate-800/80 sticky top-0 z-10 backdrop-blur-sm">
+                            <tr>
+                                <th>Client / Company</th>
+                                <th>Contact Person</th>
+                                <th>Phone</th>
+                                <th>Deal Value</th>
+                                <th>Agent</th>
+                                <th>Close Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customers-table-body">
+                            <!-- JS Populated -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- VIEW: ANALYTICS -->
+            <div id="view-analytics" class="spa-view flex-col h-full gap-6">
+                <!-- Stat Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 shrink-0">
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-6 rounded-2xl shadow-sm flex flex-col">
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="text-sm font-bold text-slate-500">Total Sales (Won)</span>
+                            <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-lg"><i class="fas fa-coins"></i></div>
+                        </div>
+                        <span id="stat-totalSales" class="text-3xl font-black text-slate-800 dark:text-white">0</span>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-6 rounded-2xl shadow-sm flex flex-col">
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="text-sm font-bold text-slate-500">Active Deals</span>
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center text-lg"><i class="fas fa-briefcase"></i></div>
+                        </div>
+                        <span id="stat-activeLeads" class="text-3xl font-black text-slate-800 dark:text-white">0</span>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-6 rounded-2xl shadow-sm flex flex-col">
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="text-sm font-bold text-slate-500">Conversion Rate</span>
+                            <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center text-lg"><i class="fas fa-chart-pie"></i></div>
+                        </div>
+                        <span id="stat-conversion" class="text-3xl font-black text-slate-800 dark:text-white">0%</span>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-6 rounded-2xl shadow-sm flex flex-col justify-center">
+                        <div class="flex justify-between items-end mb-2">
+                            <span class="text-sm font-bold text-slate-500">Pipeline Health</span>
+                            <span class="text-lg font-black text-amber-500">Good</span>
+                        </div>
+                        <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 mt-2">
+                            <div class="bg-gradient-to-r from-amber-400 to-amber-500 h-2 rounded-full" style="width: 75%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Area -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-[350px]">
+                    <div class="lg:col-span-2 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm flex flex-col relative">
+                        <h3 class="font-bold text-slate-800 dark:text-white mb-6">Revenue Overview</h3>
+                        <div class="flex-1 w-full h-full relative">
+                            <canvas id="salesChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm flex flex-col relative">
+                        <h3 class="font-bold text-slate-800 dark:text-white mb-6">Leads by Status</h3>
+                        <div class="flex-1 w-full h-full relative flex items-center justify-center">
+                            <canvas id="statusChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: REPORTS -->
+            <div id="view-reports" class="spa-view flex-col h-full gap-4">
+                <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-5 rounded-2xl shadow-sm shrink-0 flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex flex-wrap items-center gap-4">
+                        <div class="flex items-center gap-3">
+                            <input type="date" id="filter-date-from" class="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm rounded-lg p-2 focus:border-almaster-royal outline-none">
+                            <span class="text-slate-400"><i class="fas fa-arrow-right"></i></span>
+                            <input type="date" id="filter-date-to" class="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm rounded-lg p-2 focus:border-almaster-royal outline-none">
+                        </div>
+                        <select id="filter-status-report" class="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm rounded-lg p-2 focus:border-almaster-royal outline-none min-w-[150px]">
+                            <option value="all">All Statuses</option>
+                            <option value="Closed (Won)">Closed (Won)</option>
+                            <option value="Negotiation">Negotiation</option>
+                            <option value="Lost">Lost</option>
+                            <option value="New">New</option>
+                        </select>
+                        <button onclick="generateReport()" class="px-5 py-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-lg text-sm font-bold transition-colors">
+                            Apply Filters
+                        </button>
+                    </div>
+                    
+                    <div class="flex items-center gap-3">
+                        <button onclick="exportToExcel()" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-bold transition-colors shadow-lg shadow-emerald-500/20 flex items-center gap-2">
+                            <i class="fas fa-file-excel"></i> Export Excel
+                        </button>
+                        <button onclick="exportToPDF()" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-bold transition-colors shadow-lg shadow-red-500/20 flex items-center gap-2">
+                            <i class="fas fa-file-pdf"></i> Export PDF
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl overflow-auto custom-scrollbar flex-1 shadow-sm">
+                    <table class="crm-table w-full" id="reports-table">
+                        <thead class="bg-slate-50 dark:bg-slate-800/80 sticky top-0">
+                            <tr>
+                                <th>ID</th>
+                                <th>Client / Company</th>
+                                <th>Assigned To</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reports-table-body">
+                            <!-- JS Populated -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 p-4 rounded-2xl shadow-sm shrink-0 flex items-center justify-between">
+                    <span class="text-sm font-bold text-slate-500">Report Total Value:</span>
+                    <span id="report-total-val" class="text-xl font-black text-almaster-royal">0</span>
+                </div>
+            </div>
+
+            <!-- VIEW: SETTINGS (Admin Only) -->
+            <div id="view-settings" class="spa-view flex-col h-full gap-6">
+                <div class="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 text-amber-600 dark:text-amber-500 flex gap-4 shrink-0">
+                    <i class="fas fa-shield-alt text-3xl"></i>
+                    <div>
+                        <h3 class="font-bold text-lg">System Configuration</h3>
+                        <p class="text-sm opacity-80 mt-1">Manage dropdown lists and system constants. These changes will reflect across all users' forms instantly.</p>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <!-- Employees Settings -->
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm flex flex-col h-[400px]">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="font-bold text-slate-800 dark:text-white"><i class="fas fa-user-tie mr-2 text-almaster-royal"></i> Sales Agents</h4>
+                            <button onclick="addSettingItem('employees')" class="text-sm text-almaster-royal font-bold hover:underline">Add New</button>
+                        </div>
+                        <div class="flex-1 overflow-auto custom-scrollbar space-y-2 pr-2" id="settings-employees-list">
+                            <!-- JS Populated -->
+                            <div class="skeleton w-full h-10"></div>
+                            <div class="skeleton w-full h-10"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sources Settings -->
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm flex flex-col h-[400px]">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="font-bold text-slate-800 dark:text-white"><i class="fas fa-bullhorn mr-2 text-emerald-500"></i> Lead Sources</h4>
+                            <button onclick="addSettingItem('sources')" class="text-sm text-almaster-royal font-bold hover:underline">Add New</button>
+                        </div>
+                        <div class="flex-1 overflow-auto custom-scrollbar space-y-2 pr-2" id="settings-sources-list">
+                            <div class="skeleton w-full h-10"></div>
+                        </div>
+                    </div>
+
+                    <!-- Currencies Settings -->
+                    <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm flex flex-col h-[400px]">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="font-bold text-slate-800 dark:text-white"><i class="fas fa-coins mr-2 text-amber-500"></i> Currencies</h4>
+                            <button onclick="addSettingItem('currencies')" class="text-sm text-almaster-royal font-bold hover:underline">Add New</button>
+                        </div>
+                        <div class="flex-1 overflow-auto custom-scrollbar space-y-2 pr-2" id="settings-currencies-list">
+                            <div class="skeleton w-full h-10"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Side Drawer (Lead Details) -->
+    <div id="lead-drawer-overlay" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 hidden" onclick="closeLeadDrawer()"></div>
+    <div id="lead-drawer" class="drawer fixed top-0 right-0 h-full w-full max-w-md bg-white dark:bg-slate-900 z-50 shadow-2xl border-l border-slate-200 dark:border-slate-700 flex flex-col">
+        <div class="h-20 flex items-center justify-between px-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+            <div>
+                <h3 id="drawer-company" class="font-black text-lg text-slate-900 dark:text-white">Loading...</h3>
+                <p id="drawer-contact" class="text-xs font-bold text-slate-500"></p>
+            </div>
+            <button onclick="closeLeadDrawer()" class="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+            <!-- Action buttons -->
+            <div class="flex gap-2 mb-6">
+                <button onclick="editLeadFromDrawer()" class="flex-1 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-sm font-bold transition-colors">
+                    <i class="fas fa-edit mr-1"></i> Edit
+                </button>
+                <button onclick="deleteLeadFromDrawer()" class="flex-1 py-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-lg text-sm font-bold transition-colors">
+                    <i class="fas fa-trash-alt mr-1"></i> Delete
+                </button>
+            </div>
+            
+            <div class="space-y-6">
+                <!-- Info Grid -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Status</span>
+                        <div id="drawer-status"></div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Deal Value</span>
+                        <div id="drawer-value" class="font-black text-emerald-500"></div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Phone</span>
+                        <div class="flex items-center justify-between">
+                            <span id="drawer-phone" class="font-bold text-sm"></span>
+                            <div class="flex gap-1" id="drawer-phone-actions"></div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <span class="block text-[10px] uppercase font-bold text-slate-400 mb-1">Assigned Agent</span>
+                        <div id="drawer-agent" class="font-bold text-sm text-almaster-royal"></div>
+                    </div>
+                </div>
+
+                <!-- Project Details -->
+                <div>
+                    <h4 class="font-bold text-sm text-slate-800 dark:text-white mb-2 border-b border-slate-200 dark:border-slate-700 pb-2">Project Details</h4>
+                    <p id="drawer-project" class="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800"></p>
+                </div>
+
+                <!-- Timeline / Activity -->
+                <div>
+                    <h4 class="font-bold text-sm text-slate-800 dark:text-white mb-4 border-b border-slate-200 dark:border-slate-700 pb-2">Activity Timeline</h4>
+                    <div class="relative border-l-2 border-slate-200 dark:border-slate-700 ml-3 space-y-6" id="drawer-timeline">
+                        <!-- Timeline items injected by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lead Form Modal -->
+    <div id="lead-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex justify-center items-center p-4">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-full overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div class="flex justify-between items-center p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+                <h3 id="modal-title" class="text-xl font-black text-slate-800 dark:text-white">Add New Lead</h3>
+                <button onclick="closeLeadModal()" class="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 flex items-center justify-center transition-colors">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto custom-scrollbar flex-1">
+                <form id="lead-form" class="space-y-6">
+                    <input type="hidden" id="lead-id">
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Basic Info -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Company Name *</label>
+                            <input type="text" id="lead-company" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Contact Person *</label>
+                            <input type="text" id="lead-contactName" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Contact Title</label>
+                            <input type="text" id="lead-contactTitle" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Phone Number (with code) *</label>
+                            <input type="text" id="lead-phone" required class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none" placeholder="+966...">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Email</label>
+                            <input type="email" id="lead-email" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Country</label>
+                            <input type="text" id="lead-country" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        
+                        <!-- Deal Details -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Lead Source</label>
+                            <select id="lead-source" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                                <!-- Populated dynamically from settings -->
+                                <option value="Website">Website</option>
+                                <option value="WhatsApp">WhatsApp</option>
+                                <option value="Email">Email</option>
+                                <option value="Personal">Personal</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Sector / Industry</label>
+                            <input type="text" id="lead-sector" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        
+                        <!-- Dynamic Lists -->
+                        <div class="relative" id="employee-dropdown-container">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Assigned Employee *</label>
+                            <!-- Hidden input to store the actual value (email or name) -->
+                            <input type="hidden" id="lead-assignedEmployee" required>
+                            
+                            <!-- Custom Select Button -->
+                            <button type="button" onclick="toggleEmployeeDropdown()" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none flex justify-between items-center text-left">
+                                <div id="selected-employee-content" class="flex items-center gap-2 text-slate-400">
+                                    <span>Select an employee...</span>
+                                </div>
+                                <i class="fas fa-chevron-down text-slate-400 text-xs transition-transform" id="employee-dropdown-icon"></i>
+                            </button>
+                            
+                            <!-- Dropdown List -->
+                            <div id="employee-dropdown-list" class="absolute z-50 w-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl hidden max-h-48 overflow-y-auto custom-scrollbar">
+                                <div class="p-2 sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
+                                    <input type="text" id="employee-search" placeholder="Search..." onkeyup="filterEmployeeList()" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded p-1.5 text-xs outline-none focus:border-almaster-royal">
+                                </div>
+                                <div id="employee-options" class="p-1">
+                                    <!-- Populated dynamically -->
+                                    <div class="p-4 text-center text-xs text-slate-400"><i class="fas fa-circle-notch fa-spin"></i> Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Status</label>
+                            <select id="lead-status" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none font-bold">
+                                <option value="New">New</option>
+                                <option value="Negotiation">Negotiation</option>
+                                <option value="Closed (Won)">Closed (Won)</option>
+                                <option value="Lost">Lost</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Value -->
+                        <div class="col-span-1 md:col-span-2 flex gap-4">
+                            <div class="flex-1">
+                                <label class="block text-xs font-bold text-slate-500 mb-1">Project Value</label>
+                                <input type="number" id="lead-value" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none" placeholder="0">
+                            </div>
+                            <div class="w-32">
+                                <label class="block text-xs font-bold text-slate-500 mb-1">Currency</label>
+                                <select id="lead-currency" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                                    <!-- Populated dynamically from settings -->
+                                    <option value="SAR">SAR</option>
+                                    <option value="USD">USD</option>
+                                    <option value="EGP">EGP</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Project Details -->
+                        <div class="col-span-1 md:col-span-2">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Project Details</label>
+                            <textarea id="lead-projectDetails" rows="3" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none custom-scrollbar"></textarea>
+                        </div>
+
+                        <!-- Tracking Dates -->
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">First Contact Date</label>
+                            <input type="datetime-local" id="lead-firstContactDate" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Next Action Date</label>
+                            <input type="datetime-local" id="lead-nextActionDate" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                        
+                        <div class="col-span-1 md:col-span-2">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">Next Action Description / Feedback</label>
+                            <input type="text" id="lead-nextActionDesc" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-sm focus:border-almaster-royal outline-none">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end gap-3">
+                <button type="button" onclick="closeLeadModal()" class="px-5 py-2 rounded-lg font-bold text-sm bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors">Cancel</button>
+                <button type="button" onclick="saveLead(event)" class="px-5 py-2 rounded-lg font-bold text-sm bg-almaster-royal hover:bg-almaster-royalLt text-white shadow-lg shadow-blue-500/30 transition-colors flex items-center gap-2">
+                    <i class="fas fa-save"></i> Save Lead
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Custom Logic -->
+    <script src="js/sales_app.js"></script>
+</body>
+</html>
