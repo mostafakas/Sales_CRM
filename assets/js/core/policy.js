@@ -84,7 +84,7 @@ export const statusLabel = (s) => { const m = REQUEST_STATUS[s]; return m ? L(m.
 export const typeLabel = (t) => { const m = REQUEST_TYPES[t]; return m ? L(m.ar, m.en) : t; };
 export const modeLabel = (m) => { const x = MODE_META[m]; return x ? L(x.ar, x.en) : m; };
 export const roleLabel = (r) => { const x = ROLE_META[normRole(r)]; return x ? L(x.ar, x.en) : r; };
-export const normRole = (r) => (r === 'supervisor' ? 'hr' : (ROLE_META[r] ? r : 'employee'));
+export const normRole = (raw) => { const r = String(raw || '').trim().toLowerCase(); return r === 'supervisor' ? 'hr' : (ROLE_META[r] ? r : 'employee'); };
 
 // ---------- live policy ----------
 export const policy = structuredClone(DEFAULT_POLICY);

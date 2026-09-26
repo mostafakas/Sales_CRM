@@ -35,6 +35,9 @@ export function staleDay(u, at = now()) {
   if (!u || !u.dayKey) return null;
   const today = dayKey(at);
   if (u.dayKey >= today) return null;
+  // days from the old system (before go-live, or docs the new app never touched) are not reviewable here
+  if (u.checkedOut === undefined) return null;
+  if (policy.trackingStart && u.dayKey < policy.trackingStart) return null;
   if (u.checkedOut && (!u.status || u.status === 'Offline')) return null;
   return u.dayKey;
 }

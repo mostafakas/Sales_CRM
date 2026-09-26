@@ -1,7 +1,7 @@
 // Leaves & balances: who's out this month, balances per person, open a new leave year.
 import { L, esc, num, fmtMonth, addMonths, ym as ymOf, monthDates, fmtDate, isAr, weekday } from '../core/utils.js';
 import { toast, toastErr, avatar, empty, loader, busy, confirmDialog } from '../core/ui.js';
-import { now, isHR, session } from '../core/session.js';
+import { now, isHR, isAdmin, session } from '../core/session.js';
 import { leaveTypes, planFor, policy, leaveTypeLabel, modeLabel } from '../core/policy.js';
 import { list, query, col, where, db, doc, writeBatch, serverTimestamp } from '../core/fb.js';
 import { managedPeople } from '../services/directory.js';
@@ -74,6 +74,7 @@ export default async function render(root) {
         let n = 0; const b = writeBatch(db);
         for (const { p, b: cur } of balRows) {
           if (existing.some(x => x.email === p.email)) continue;
+          if (p.email === session.email && !isAdmin()) continue; // your own balance is opened by another HR member or an admin
           const nb = emptyBalance(p.email, year + 1);
           if (carry && nb.types.annual) { const left = Math.max(0, remaining(cur.types.annual || { entitled: 0 })); nb.types.annual.adjust = Math.min(carry, left); }
           b.set(doc(db, 'balances', balanceId(p.email, year + 1)), { ...nb, openedBy: session.email, updatedAt: serverTimestamp() });

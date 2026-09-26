@@ -2,7 +2,7 @@
 // Safe to re-run: every target document has a deterministic id and old collections are never deleted.
 import { db, doc, writeBatch, serverTimestamp, deleteField, list, col, read, setDoc, toMs } from '../core/fb.js';
 import { session, now } from '../core/session.js';
-import { DEFAULT_POLICY, leaveTypes, normRole, stagesFor } from '../core/policy.js';
+import { DEFAULT_POLICY, leaveTypes, normRole, stagesFor, dayKey } from '../core/policy.js';
 import { ymd, dateRange, weekday, normEmail } from '../core/utils.js';
 import { emptyBalance, balanceId } from './requests.js';
 
@@ -40,7 +40,8 @@ export async function migrate({ dry = true, progress } = {}) {
     list(col('attendance_override')).catch(() => []), read('system_settings', 'work_config').catch(() => null),
     list(col('requests')).catch(() => [])
   ]);
-  const userMap = Object.fromEntries(users.map(u => [u.id, u]));
+  const userMap = Object.fromEntries(users.map(u => [u.id, { ...u, leaderEmail: u.leaderEmail ? normEmail(u.leaderEmail) : '' }]));
+  const todayKey = dayKey(now());
 
   // 1) settings — attendance before today was not archived by the old system, so tracking starts today
   const general = await read('settings', 'general').catch(() => null);
@@ -57,7 +58,14 @@ export async function migrate({ dry = true, progress } = {}) {
     if (role !== u.role) upd.role = role;
     if (u.remoteQuota === undefined) upd.remoteQuota = Number(u.onlineDaysLimit) > 0 ? Number(u.onlineDaysLimit) : DEFAULT_POLICY.defaultRemoteQuota;
     if (u.photo && u.photo.length > 60000) { upd.photo = ''; report.photosShrunk++; }
-    if (u.checkedOut === undefined) upd.checkedOut = (u.status || 'Offline') === 'Offline';
+    // leader links are compared exactly by the security rules → always lowercase
+    if (u.leaderEmail && normEmail(u.leaderEmail) !== u.leaderEmail) upd.leaderEmail = normEmail(u.leaderEmail);
+    // a live day left open by the old system is closed (it was never archived, so it is not counted)
+    if (u.checkedOut === undefined) {
+      const runningToday = u.dayKey === todayKey && (u.status || 'Offline') !== 'Offline';
+      upd.checkedOut = !runningToday;
+      if (!runningToday && (u.status || 'Offline') !== 'Offline') upd.status = 'Offline';
+    }
     const allowances = [];
     if (u.allowance && Number(u.allowance.value)) allowances.push({ name: 'بدلات', amount: u.allowance.type === 'percentage' ? Math.round((Number(u.fullSalary) || 0) * Number(u.allowance.value) / 100) : Number(u.allowance.value) });
     const priv = {
@@ -120,7 +128,7 @@ export async function migrate({ dry = true, progress } = {}) {
     if (!['approved', 'rejected', 'cancelled'].includes(status)) status = u.leaderEmail ? 'pending_leader' : 'pending_hr';
     const days = dateRange(start, end).filter(d => !isWeekend(d)).length || 1;
     const nr = {
-      email, name: r.name || u.name || email, leaderEmail: u.leaderEmail || r.managerId || '', department: u.department || '',
+      email, name: r.name || u.name || email, leaderEmail: u.leaderEmail || normEmail(r.managerId || ''), department: u.department || '',
       type, startDate: start, endDate: end, days, reason: r.reason || '', status, stages: stagesFor(type, u),
       createdMs: toMs(r.submitted_at) || now(), createdAt: r.submitted_at || serverTimestamp(), updatedAt: serverTimestamp(), migrated: true,
       history: [{ at: toMs(r.submitted_at) || now(), by: email, byName: r.name || email, action: 'submitted', note: '' },

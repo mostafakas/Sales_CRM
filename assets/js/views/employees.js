@@ -90,7 +90,7 @@ export async function openEditor(email) {
         <div data-pane="job" class="form-grid hidden">
           <div class="field"><label>${L('المسمى الوظيفي', 'Job title')}</label><input class="input" name="title" value="${esc(u.title || '')}"></div>
           <div class="field"><label>${L('القسم', 'Department')}</label><input class="input" name="department" list="dl-dept" value="${esc(u.department || '')}"><datalist id="dl-dept">${deptList.map(d => `<option value="${esc(d)}">`).join('')}</datalist></div>
-          <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role">${Object.keys(ROLE_META).filter(r => r !== 'admin' || isAdmin()).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
+          <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role" ${!isNew && email === session.email && !isAdmin() ? 'disabled' : ''}>${Object.keys(ROLE_META).filter(r => isAdmin() || r === normRole(u.role) || !['admin', 'finance'].includes(r)).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('المدير المباشر', 'Direct manager')}</label><select class="select" name="leaderEmail"><option value="">${L('بدون (يروح لـ HR)', 'None (goes to HR)')}</option>${people.map(p => `<option value="${esc(p.email)}" ${u.leaderEmail === p.email ? 'selected' : ''}>${esc(p.name || p.email)} — ${esc(roleLabel(p.role))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('حصة الأونلاين الشهرية (أيام)', 'Monthly remote quota (days)')}</label><input class="input num" type="number" min="0" max="31" name="remoteQuota" value="${esc(u.remoteQuota ?? policy.defaultRemoteQuota)}"></div>
           <div class="row between span-2"><div><b>${L('يسجّل حضور وانصراف', 'Tracks attendance')}</b><div class="xs muted">${L('اقفلها للإدارة العليا أو اللي مش مطلوب منهم تسجيل — مش هيتحسب عليهم غياب ولا هيظهروا في تقارير الحضور.', 'Turn off for executives or anyone not required to clock in — no absence, not in attendance reports.')}</div></div><label class="switch"><input type="checkbox" name="trackAttendance" ${u.trackAttendance !== false ? 'checked' : ''}><span></span></label></div>
@@ -107,7 +107,8 @@ export async function openEditor(email) {
         <div data-pane="access" class="col gap-16 hidden">
           <div class="row between"><div><b>${L('صلاحية الـ CRM', 'CRM access')}</b><div class="xs muted">${L('فتح تطبيق المبيعات', 'Open the sales app')}</div></div><label class="switch"><input type="checkbox" name="crm" ${u.permissions && u.permissions.crm ? 'checked' : ''}><span></span></label></div>
           <div class="field"><label>${L('دوره في الـ CRM', 'CRM role')}</label><select class="select" name="crmRole">${['agent', 'supervisor', 'admin'].map(r => `<option value="${r}" ${((u.permissions && u.permissions.crmRole) || 'agent') === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
-          <div class="row between"><div><b>${L('صلاحية الرواتب والخزينة', 'Payroll & treasury access')}</b><div class="xs muted">${L('لموظفي المالية', 'For finance staff')}</div></div><label class="switch"><input type="checkbox" name="payroll" ${u.permissions && u.permissions.payroll ? 'checked' : ''}><span></span></label></div>
+          <div class="row between"><div><b>${L('صلاحية الرواتب والخزينة', 'Payroll & treasury access')}</b><div class="xs muted">${L('لموظفي المالية', 'For finance staff')}</div></div><label class="switch"><input type="checkbox" name="payroll" ${u.permissions && u.permissions.payroll ? 'checked' : ''} ${isAdmin() ? '' : 'disabled'}><span></span></label></div>
+          ${isAdmin() ? '' : `<p class="xs muted"><i class="fas fa-lock"></i> ${L('صلاحية الرواتب ودور «المالية» بيمنحهم الأدمن بس.', 'Payroll access and the Finance role can only be granted by an admin.')}</p>`}
           ${isNew ? '' : `<div class="divider"></div>
           <div class="row between"><div><b style="color:var(--bad)">${L('إيقاف الحساب', 'Suspend account')}</b><div class="xs muted">${L('يمنع الدخول فوراً ويحتفظ بكل السجلات', 'Blocks sign-in immediately; keeps all records')}</div></div><label class="switch"><input type="checkbox" name="isSuspended" ${u.isSuspended ? 'checked' : ''}><span></span></label></div>`}
         </div>
@@ -145,9 +146,11 @@ export async function openEditor(email) {
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
       gender: f.gender.value, hireDate: val('hireDate'), remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
-      permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: f.payroll.checked }, updatedAt: serverTimestamp()
+      permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: isAdmin() ? f.payroll.checked : !!(u.permissions && u.permissions.payroll) }, updatedAt: serverTimestamp()
     };
-    if (!isNew) pub.isSuspended = !!(f.isSuspended && f.isSuspended.checked);
+    // a non-admin cannot change their own role, access or suspension (the rules reject it)
+    if (!isNew && email === session.email && !isAdmin()) { delete pub.role; delete pub.permissions; delete pub.isSuspended; }
+    if (!isNew && !(email === session.email && !isAdmin())) pub.isSuspended = !!(f.isSuspended && f.isSuspended.checked);
     const allowances = [...allowBox.children].map(r => ({ name: r.querySelector('[data-an]').value.trim(), amount: Number(r.querySelector('[data-aa]').value || 0) })).filter(a => a.name || a.amount);
     const privData = {
       email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value,
@@ -157,21 +160,30 @@ export async function openEditor(email) {
       if (isNew) {
         const exists = await read('users', newEmail).catch(() => null);
         if (exists) throw Object.assign(new Error('exists'), { userMessage: L('فيه موظف بالإيميل ده بالفعل.', 'An employee with this email already exists.') });
-        const pw = genPassword();
+        let pw = genPassword();
         const sa = secondaryAuth();
         try { await createUserWithEmailAndPassword(sa, newEmail, pw); }
         catch (ex) {
-          if (String(ex.code).includes('email-already-in-use')) throw Object.assign(ex, { userMessage: L('الإيميل ده له حساب دخول قديم. امسحه من Firebase Console ← Authentication أو استخدم إيميل تاني.', 'This email already has a login. Remove it in Firebase Console → Authentication or use another email.') });
-          throw ex;
+          // the login already exists (old system, or a deleted profile): link a new profile to it
+          if (String(ex.code).includes('email-already-in-use')) pw = '';
+          else throw ex;
         } finally { try { await signOut(sa); } catch {} }
         const b = writeBatch(db);
-        b.set(doc(db, 'users', newEmail), { ...pub, isSuspended: false, status: 'Offline', timeBank: { Online: 0, Break: 0, Meeting: 0 }, dayKey: '', mustChangePassword: true, createdAt: serverTimestamp(), createdBy: session.email });
+        b.set(doc(db, 'users', newEmail), { ...pub, isSuspended: false, status: 'Offline', timeBank: { Online: 0, Break: 0, Meeting: 0 }, dayKey: '', checkedOut: true, mustChangePassword: !!pw, createdAt: serverTimestamp(), createdBy: session.email });
         b.set(doc(db, 'employees_private', newEmail), privData);
         const year = new Date(now()).getFullYear();
         b.set(doc(db, 'balances', balanceId(newEmail, year)), { ...emptyBalance(newEmail, year), updatedAt: serverTimestamp() });
         b.set(doc(col('audit_log')), { action: 'user.create', target: newEmail, by: session.email, at: serverTimestamp() });
         await b.commit();
         m.close();
+        if (!pw) {
+          modal({
+            title: L('تم ربط الحساب', 'Account linked'), icon: 'fa-link', size: 'narrow',
+            body: `<p>${L('الإيميل ده كان له حساب دخول قبل كده، فاتربط بيه الملف الجديد. الموظف يدخل بكلمة المرور القديمة، ولو نسيها يستخدم «نسيت كلمة المرور؟» في صفحة الدخول.', 'This email already had a login, so the new profile was linked to it. The employee signs in with their existing password, or uses "Forgot password?" on the sign-in page.')}</p>`,
+            foot: `<button class="btn btn-primary" data-close>${L('تمام', 'Done')}</button>`
+          });
+          return;
+        }
         const cm = modal({
           title: L('تم إنشاء الحساب', 'Account created'), icon: 'fa-circle-check', size: 'narrow',
           body: `<p class="mb-16">${L('ابعت البيانات دي للموظف. هيُطلب منه يغيّر كلمة المرور أول ما يدخل.', 'Send these to the employee. They must change the password at first sign-in.')}</p>
@@ -183,7 +195,8 @@ export async function openEditor(email) {
       } else {
         const b = writeBatch(db);
         b.update(doc(db, 'users', email), pub);
-        b.set(doc(db, 'employees_private', email), privData, { merge: true });
+        // own salary/bank data is changed by another HR member or an admin, never by yourself
+        if (email !== session.email || isAdmin()) b.set(doc(db, 'employees_private', email), privData, { merge: true });
         if (f.role.value === 'leader') {
           m.$$('[data-member]').forEach(cb => {
             const pe = person(cb.dataset.member); if (!pe) return;

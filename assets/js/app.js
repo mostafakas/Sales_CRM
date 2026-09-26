@@ -7,7 +7,7 @@ import { toast, toastErr, modal, avatar } from './core/ui.js';
 import { startDirectory } from './services/directory.js';
 import { startNotifications, onNotifications, unreadCount } from './services/notify.js';
 import { watchInbox } from './services/requests.js';
-import { auth, updatePassword, updateDoc, ref } from './core/fb.js';
+import { auth, updatePassword, updateDoc, ref, read } from './core/fb.js';
 
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
@@ -180,7 +180,31 @@ async function boot() {
   await route();
   const s = byId('splash'); s.style.opacity = '0'; setTimeout(() => s.remove(), 300);
   if (session.profile && session.profile.mustChangePassword) forcePasswordChange();
+  setupCheck();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   if ('Notification' in window && Notification.permission === 'default') setTimeout(() => { try { Notification.requestPermission(); } catch {} }, 4000);
 }
 boot();
+
+/** Tell people plainly when the Firebase side isn't set up yet (rules not published / old data not migrated). */
+async function setupCheck() {
+  let msg = '';
+  try { await read('settings', 'general'); }
+  catch (e) {
+    if (String(e && e.code).includes('permission')) msg = isAdmin()
+      ? L('قواعد الأمان الجديدة (firestore.rules) لسه ما اتنشرتش على Firebase، فأغلب الشاشات هتقول «مش مسموح». انشرها من Firebase Console ← Firestore ← Rules ← Publish.', 'The new security rules (firestore.rules) are not published on Firebase yet, so most screens will say "not allowed". Publish them in Firebase Console → Firestore → Rules → Publish.')
+      : L('السيستم لسه بيتجهز من الإدارة، وبعض الشاشات ممكن ما تشتغلش دلوقتي.', 'The system is still being set up by the admin; some screens may not work yet.');
+  }
+  if (!msg && isAdmin()) {
+    const m = await read('settings', 'migration').catch(() => null);
+    if (!m || !m.done) msg = L('بيانات السيستم القديم لسه ما اترحّلتش. افتح الإعدادات ← النظام والترحيل ← «معاينة» ثم «تنفيذ».', 'Data from the old system has not been migrated yet. Open Settings → System & migration → Preview, then Run.');
+  }
+  if (!msg) return;
+  const view = byId('view');
+  const b = document.createElement('div');
+  b.className = 'alert warn';
+  b.id = 'setup-banner';
+  b.style.cssText = 'margin:16px clamp(16px,3vw,32px) 0;';
+  b.innerHTML = `<i class="fas fa-triangle-exclamation"></i><div>${esc(msg)}</div>`;
+  view.parentNode.insertBefore(b, view);
+}

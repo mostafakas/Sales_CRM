@@ -1,7 +1,9 @@
 rules_version = '2';
 // AL MASTER HR — Firestore security rules.
 // Roles live on users/{email}.role: employee | leader | hr | finance | admin  (legacy "supervisor" = hr).
-// Deploy with:  firebase deploy --only firestore:rules
+// Deploy with:  firebase deploy --only firestore:rules   (or paste into Console → Firestore → Rules → Publish)
+// Principles: deny by default · every rule requires an active (non-suspended) profile · nobody edits their own
+// role, permissions, salary, balance or corrected attendance · payroll/finance access is granted by admins only.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -18,6 +20,12 @@ service cloud.firestore {
     function isFinance() { return active() && (role() in ['finance', 'admin'] || prof().get('permissions', {}).get('payroll', false) == true); }
     function hasCRM() { return active() && (role() == 'admin' || prof().get('permissions', {}).get('crm', false) == true); }
     function leads(email) { return exists(uPath(email)) && get(uPath(email)).data.get('leaderEmail', '') == me(); }
+    function payrollOf(d) { return d.get('permissions', {}).get('payroll', false) == true; }
+    // HR/finance may manage everyone's records except their own (admins may do both)
+    function othersOnly() {
+      return isAdmin() || ((resource == null || resource.data.get('email', '') != me())
+                        && (request.resource == null || request.resource.data.get('email', '') != me()));
+    }
 
     // ---------- helpers ----------
     function affected() { return request.resource.data.diff(resource.data).affectedKeys(); }
@@ -59,17 +67,28 @@ service cloud.firestore {
 
     // ---------- users (public profile + live status) ----------
     match /users/{email} {
+      function newDay() { return request.resource.data.get('dayKey', '') != resource.data.get('dayKey', ''); }
       allow get: if (signedIn() && email == me()) || active();
       allow list: if active();
-      allow create: if isHR() && (request.resource.data.get('role', '') != 'admin' || isAdmin());
-      allow delete: if isAdmin();
 
-      // HR / admin: anything, but only admins touch admin accounts or grant admin
-      allow update: if isHR()
-        && ((resource.data.get('role', '') != 'admin' && request.resource.data.get('role', '') != 'admin') || isAdmin());
+      // HR creates accounts; only admins create admin / finance accounts or grant payroll access
+      allow create: if isHR() && email == email.lower()
+        && (isAdmin() || (!(request.resource.data.get('role', 'employee') in ['admin', 'finance']) && !payrollOf(request.resource.data)));
+      allow delete: if isAdmin() && email != me();
+
+      // HR / admin edit profiles. Non-admin HR: never admin accounts, never finance role or payroll access,
+      // and never their own role, permissions or suspension.
+      allow update: if isHR() && (isAdmin() || (
+            resource.data.get('role', '') != 'admin'
+         && request.resource.data.get('role', '') != 'admin'
+         && (!('role' in affected()) || (!(resource.data.get('role', '') in ['finance']) && !(request.resource.data.role in ['finance'])))
+         && payrollOf(request.resource.data) == payrollOf(resource.data)
+         && (email != me() || !affected().hasAny(['role', 'permissions', 'isSuspended']))
+      ));
 
       // A leader may clear the "remote pending" flag for a team member
-      allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending']);
+      allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending'])
+        && request.resource.data.remotePending == false;
 
       // Self-service: live attendance fields only, with server-verified clock and bounded time
       allow update: if signedIn() && email == me()
@@ -77,19 +96,24 @@ service cloud.firestore {
         && onlyChanged(['status', 'lastChange', 'lastChangeClient', 'timeBank', 'firstOnlineAt', 'dayKey', 'workLocation',
                         'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword'])
         && (!('status' in affected()) || request.resource.data.status in ['Online', 'Break', 'Meeting', 'Offline'])
+        && (!('dayKey' in affected()) || request.resource.data.dayKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
         && (!('lastChange' in affected()) || request.resource.data.lastChange == request.time)
         && (!('lastLoginAt' in affected()) || request.resource.data.lastLoginAt == request.time)
         && (!('firstOnlineAt' in affected()) || request.resource.data.firstOnlineAt == request.time || request.resource.data.firstOnlineAt == null)
         && (!('mustChangePassword' in affected()) || request.resource.data.mustChangePassword == false)
-        && (!('photo' in affected()) || request.resource.data.photo.size() < 120000)
+        // work location and the "remote without approval" flag are set once, when the day starts
+        && (!('workLocation' in affected()) || newDay() || resource.data.get('workLocation', null) == null)
+        && (!('remotePending' in affected()) || newDay() || request.resource.data.remotePending == true)
+        && (!('photo' in affected()) || (request.resource.data.photo is string && request.resource.data.photo.size() < 120000))
+        && (!('sessionId' in affected()) || (request.resource.data.sessionId is string && request.resource.data.sessionId.size() < 64))
         && timeBankOk();
     }
 
     // ---------- salary, bank, contract (restricted) ----------
     match /employees_private/{email} {
-      allow get: if signedIn() && email == me();
+      allow get: if active() && email == me();
       allow read: if isHR() || isFinance();
-      allow write: if isHR() || isFinance();
+      allow write: if (isHR() || isFinance()) && (email != me() || isAdmin());
     }
 
     // ---------- settings ----------
@@ -112,7 +136,8 @@ service cloud.firestore {
           || (d.checkOutMs <= nowMs() + 300000 && (d.get('autoClosed', false) == true || d.checkOutMs >= nowMs() - 300000));
       }
       allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
-      allow write: if isHR();
+      // HR corrections (not on their own days)
+      allow write: if isHR() && othersOnly();
       // self create (start of day, or closing a forgotten day)
       allow create: if active() && request.resource.data.email == me() && id == me() + '_' + request.resource.data.date
         && request.resource.data.keys().hasOnly(selfKeys())
@@ -147,14 +172,17 @@ service cloud.firestore {
     }
     match /schedules/{id} {
       allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
-      allow write: if isHR() || (active() && leads(request.resource.data.email) && request.resource.data.get('leaderEmail', '') == me());
+      allow write: if (isHR() && othersOnly())
+        || (active() && request.resource != null && leads(request.resource.data.email) && request.resource.data.get('leaderEmail', '') == me()
+            && (resource == null || resource.data.email == request.resource.data.email));
     }
 
     // ---------- requests ----------
     match /requests/{id} {
       function stageFields() { return ['status', 'updatedAt', 'history', 'decidedBy', 'approvedBy', 'approvedAt']; }
       allow read: if active() && (resource.data.email == me() || resource.data.get('leaderEmail', '') == me() || isHR() || isFinance());
-      allow create: if isHR() || (active()
+      // HR/admin may file on someone else's behalf (and the migration imports old requests); own requests follow the normal path
+      allow create: if (isHR() && othersOnly()) || (active()
         && request.resource.data.email == me()
         && request.resource.data.get('leaderEmail', '') == prof().get('leaderEmail', '')
         && request.resource.data.type in ['leave', 'remote', 'excuse', 'mission', 'correction', 'advance', 'letter']
@@ -183,17 +211,17 @@ service cloud.firestore {
     // ---------- leave balances ----------
     match /balances/{id} {
       allow read: if active() && (resource == null || resource.data.email == me() || isHR() || isFinance() || leads(resource.data.email));
-      allow write: if isHR();
+      allow write: if isHR() && othersOnly();
     }
     match /balance_ledger/{id} {
       allow read: if active() && (resource.data.email == me() || isHR() || isFinance());
-      allow create: if isHR();
+      allow create: if isHR() && othersOnly() && request.resource.data.by == me();
     }
 
     // ---------- money ----------
     match /advances/{id} {
       allow read: if active() && (resource.data.email == me() || isHR() || isFinance());
-      allow write: if isHR() || isFinance();
+      allow write: if (isHR() || isFinance()) && othersOnly();
     }
     match /payroll_runs/{month} {
       allow read: if isHR() || isFinance();
@@ -214,13 +242,15 @@ service cloud.firestore {
     }
     match /notifications/{id} {
       allow read: if signedIn() && resource.data.to == me();
-      allow create: if active() && request.resource.data.from == me() && request.resource.data.to is string;
+      allow create: if active() && request.resource.data.from == me() && request.resource.data.to is string
+        && request.resource.data.get('read', false) == false && request.resource.data.get('title', '').size() < 300;
       allow update: if signedIn() && resource.data.to == me() && onlyChanged(['read']);
       allow delete: if signedIn() && resource.data.to == me();
     }
     match /audit_log/{id} {
       allow read: if isHR();
       allow create: if (isHR() || isFinance()) && request.resource.data.by == me();
+      allow update, delete: if false;
     }
 
     // ---------- CRM / sales apps ----------
@@ -231,7 +261,7 @@ service cloud.firestore {
     match /expenses/{id} { allow read, write: if hasCRM(); }
     match /invoices/{id} { allow read, write: if hasCRM(); }
 
-    // ---------- old system (read-only, kept for the migration) ----------
+    // ---------- old system (read-only, kept for the migration; admin only) ----------
     match /system_settings/{doc} { allow read: if active(); allow write: if false; }
     match /hr_stats/{doc} { allow read: if isAdmin(); allow write: if false; }
     match /leave_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
@@ -240,6 +270,15 @@ service cloud.firestore {
     match /attendance_override/{doc} { allow read: if isAdmin(); allow write: if false; }
     match /work_mode_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
     match /attendance_records/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /freelancers/{doc} { allow read: if isAdmin(); allow write: if false; }
+    // features no page uses any more (chat, tasks, screenshots, shared-tool queue) — closed.
+    // They were readable/writable by ANY signed-in user under the old rules.
+    match /messages/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /private_messages/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /typing_status/{doc} { allow read, write: if false; }
+    match /tasks/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /screenshot_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
+    match /tool_requests/{doc} { allow read: if isAdmin(); allow write: if false; }
     match /_serverTime/{doc} { allow read, write: if false; }
 
     // everything else: denied
