@@ -10,14 +10,18 @@ import { exportSheet } from './export.js';
 const RUN_STATUS = { draft: ['مسودة', 'Draft', 'warn'], approved: ['معتمد — القسائم ظاهرة للموظفين', 'Approved — payslips visible', 'brand'], paid: ['تم الصرف', 'Paid', 'ok'], closed: ['أرشيف النظام القديم', 'Legacy archive', ''] };
 
 export default async function render(root) {
-  let month = ymOf(now()), run = null, items = [], unsubs = [];
+  let month = ymOf(now()), run = null, items = [], unsubs = [], privs = null;
+  // salary data changed after the run was calculated?
+  const salaryOf = (email) => { const p = privs && privs.find(x => x.id === email); const s = (p && p.salary) || {}; return { basic: Number(s.basic) || 0, allowances: (s.allowances || []).reduce((t, a) => t + (Number(a.amount) || 0), 0), fixed: Number(s.fixedDeductions) || 0 }; };
+  const isStale = (i) => { if (!privs || !run || run.status !== 'draft') return false; const c = salaryOf(i.email); return c.basic !== Number(i.basic || 0) || Math.round(c.allowances) !== Math.round(Number(i.allowances || 0)) || c.fixed !== Number(i.fixed || 0); };
+  const loadPrivs = () => list(col('employees_private')).then(r => { privs = r; draw(); }).catch(() => {});
   root.innerHTML = `
     <div class="page-head"><div><h2>${L('الرواتب', 'Payroll')}</h2><p>${L('الخصومات بتتحسب تلقائياً من الغياب والإجازات بدون أجر والتأخير (لو مفعّل) وأقساط السلف.', 'Deductions are calculated from absence, unpaid leave, lateness (if enabled) and advance installments.')}</p></div>
       <div class="row gap-8"><button class="btn btn-icon" data-m="-1"><i class="fas fa-chevron-right" data-flip></i></button><b id="ml" style="min-width:130px;text-align:center"></b><button class="btn btn-icon" data-m="1"><i class="fas fa-chevron-left" data-flip></i></button></div></div>
     <div class="card mb-16"><div class="card-body row between" style="flex-wrap:wrap;gap:12px" id="bar"></div></div>
     <div class="grid g-4 keep-2 mb-16" id="kpi"></div>
     <div class="card"><div class="table-wrap"><table class="table"><thead><tr>
-      <th>${L('الموظف', 'Employee')}</th><th class="num">${L('الإجمالي', 'Gross')}</th><th class="num">${L('غياب/بدون أجر', 'Absence/unpaid')}</th><th class="num">${L('تأخير', 'Late')}</th><th class="num">${L('سلف', 'Advance')}</th><th class="num">${L('ثابتة وأخرى', 'Fixed & other')}</th><th class="num">${L('الصافي', 'Net')}</th><th>${L('الحالة', 'Status')}</th><th></th>
+      <th>${L('الموظف', 'Employee')}</th><th class="num">${L('الأساسي', 'Basic')}</th><th class="num">${L('بدلات ومكافآت', 'Allowances & bonus')}</th><th class="num">${L('الإجمالي', 'Gross')}</th><th class="num">${L('الاستقطاعات', 'Deductions')}</th><th class="num">${L('الصافي', 'Net')}</th><th>${L('الحالة', 'Status')}</th><th></th>
     </tr></thead><tbody id="rows"></tbody></table></div></div>
     <div class="card mt-16" id="adv"></div>`;
 
@@ -33,17 +37,20 @@ export default async function render(root) {
         ${run && run.status === 'approved' ? `<button class="btn" data-action="reopen"><i class="fas fa-rotate-left"></i> ${L('رجوع لمسودة', 'Back to draft')}</button><button class="btn btn-ok" data-action="payall"><i class="fas fa-money-bill-transfer"></i> ${L('تسجيل صرف الكل', 'Mark all paid')}</button>` : ''}
         ${items.length ? `<button class="btn" data-action="xls"><i class="fas fa-file-excel"></i> Excel</button>` : ''}
       </div>`;
+    const stale = items.filter(isStale);
+    const bar = root.querySelector('#bar');
+    const old = root.querySelector('#stale-banner'); if (old) old.remove();
+    if (stale.length) bar.insertAdjacentHTML('afterend', `<div id="stale-banner" class="alert warn" style="margin:0 20px 16px"><i class="fas fa-triangle-exclamation"></i><div class="grow">${L(`بيانات الراتب اتغيّرت لـ ${stale.length} موظف بعد آخر حساب (${stale.slice(0, 3).map(i => esc(i.name)).join('، ')}${stale.length > 3 ? '…' : ''}). اضغط «إعادة الحساب» عشان الأرقام تتحدّث.`, `Salary data changed for ${stale.length} employee(s) since the last calculation (${stale.slice(0, 3).map(i => esc(i.name)).join(', ')}${stale.length > 3 ? '…' : ''}). Click "Recalculate" to update.`)}</div><button class="btn btn-sm btn-primary" data-action="build"><i class="fas fa-calculator"></i> ${L('إعادة الحساب', 'Recalculate')}</button></div>`);
     const sum = (k) => items.reduce((s, i) => s + (Number(i[k]) || 0), 0);
     const k = (icon, cls, label, v) => `<div class="card stat"><div class="label"><span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>${esc(label)}</div><div class="value" style="font-size:20px">${esc(money(v))}</div></div>`;
     root.querySelector('#kpi').innerHTML = k('fa-sack-dollar', '', L('إجمالي الرواتب', 'Total gross'), sum('gross')) + k('fa-minus', 'bad', L('إجمالي الاستقطاعات', 'Total deductions'), sum('deductions')) +
       k('fa-wallet', 'ok', L('صافي المطلوب صرفه', 'Net payable'), sum('net')) + k('fa-circle-check', 'info', L('اتصرف', 'Paid so far'), items.filter(i => i.status === 'paid').reduce((s, i) => s + (i.net || 0), 0));
     root.querySelector('#rows').innerHTML = items.length ? items.map(i => `<tr>
       <td><div class="person">${avatar({ name: i.name, email: i.email }, 'sm')}<div><b>${esc(i.name)}</b><span>${esc(i.title || '')}</span></div></div></td>
+      <td class="num">${esc(money(i.basic || 0, false))}${isStale(i) && salaryOf(i.email).basic !== Number(i.basic || 0) ? `<div><span class="badge warn" title="${L('القيمة الجديدة في ملف الموظف', 'New value in the employee file')}">${L('الجديد', 'New')}: ${esc(money(salaryOf(i.email).basic, false))}</span></div>` : ''}</td>
+      <td class="num">${esc(money((i.allowances || 0) + (i.bonus || 0) + (i.incentive || 0), false))}${isStale(i) && Math.round(salaryOf(i.email).allowances) !== Math.round(Number(i.allowances || 0)) ? `<div><span class="badge warn">${L('البدلات الجديدة', 'New allowances')}: ${esc(money(salaryOf(i.email).allowances, false))}</span></div>` : ''}${(i.allowanceLines || []).length || i.bonus || i.incentive ? `<div class="xs muted">${[...(i.allowanceLines || []).map(a => `${esc(a.name || L('بدل', 'Allowance'))} ${esc(money(a.amount, false))}`), i.bonus ? `${L('مكافأة', 'Bonus')} ${esc(money(i.bonus, false))}` : '', i.incentive ? `${L('حوافز', 'Incentive')} ${esc(money(i.incentive, false))}` : ''].filter(Boolean).join(' · ')}</div>` : ''}</td>
       <td class="num">${esc(money(i.gross, false))}</td>
-      <td class="num">${esc(money((i.absenceDeduction || 0) + (i.unpaidDeduction || 0), false))}${i.absenceDays ? `<div class="xs muted">${num(i.absenceDays, 1)} ${L('يوم غياب', 'absent')}</div>` : ''}</td>
-      <td class="num">${esc(money(i.lateDeduction || 0, false))}${i.lateMinutes ? `<div class="xs muted">${esc(fmtMin(i.lateMinutes))}</div>` : ''}</td>
-      <td class="num">${esc(money(i.advance || 0, false))}</td>
-      <td class="num">${esc(money((i.fixed || 0) + (i.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0), false))}</td>
+      <td class="num">${esc(money(i.deductions || 0, false))}${(() => { const parts = [[L('غياب', 'Absence'), (i.absenceDeduction || 0) + (i.unpaidDeduction || 0)], [L('تأخير', 'Late'), i.lateDeduction], [L('سلفة', 'Advance'), i.advance], [L('ثابتة', 'Fixed'), i.fixed], [L('أخرى', 'Other'), (i.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0)]].filter(x => Number(x[1]) > 0); return parts.length ? `<div class="xs muted">${parts.map(([n, v]) => `${esc(n)} ${esc(money(v, false))}`).join(' · ')}</div>` : ''; })()}</td>
       <td class="num"><b>${esc(money(i.net, false))}</b></td>
       <td>${i.status === 'paid' ? `<span class="badge ok">${L('اتصرف', 'Paid')}</span>` : `<span class="badge">${L('مستني', 'Pending')}</span>`}</td>
       <td style="text-align:end;white-space:nowrap">
@@ -51,7 +58,7 @@ export default async function render(root) {
         ${editable ? `<button class="btn btn-sm btn-icon" data-action="edit" data-id="${esc(i.id)}" title="${L('تعديل', 'Edit')}"><i class="fas fa-pen"></i></button>` : ''}
         ${run && run.status === 'approved' && i.status !== 'paid' ? `<button class="btn btn-sm btn-ok" data-action="pay" data-id="${esc(i.id)}">${L('صرف', 'Pay')}</button>` : ''}
       </td></tr>`).join('')
-      : `<tr><td colspan="9">${empty('fa-money-check-dollar', L('مفيش رواتب للشهر ده لسه', 'No payroll for this month yet'), L('اضغط «إنشاء مسودة الرواتب».', 'Click "Create payroll draft".'))}</td></tr>`;
+      : `<tr><td colspan="8">${empty('fa-money-check-dollar', L('مفيش رواتب للشهر ده لسه', 'No payroll for this month yet'), L('اضغط «إنشاء مسودة الرواتب».', 'Click "Create payroll draft".'))}</td></tr>`;
   }
   async function drawAdvances() {
     const advs = await list(query(col('advances'), where('status', '==', 'active'))).catch(() => []);
@@ -66,12 +73,12 @@ export default async function render(root) {
   }
   function subscribe() {
     unsubs.forEach(u => u()); unsubs = [];
-    root.querySelector('#rows').innerHTML = `<tr><td colspan="9">${loader()}</td></tr>`;
+    root.querySelector('#rows').innerHTML = `<tr><td colspan="8">${loader()}</td></tr>`;
     unsubs.push(watch(ref('payroll_runs', month), r => { run = r; draw(); }));
     unsubs.push(watch(query(col('payroll_items'), where('month', '==', month)), rows => { items = rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); draw(); }));
   }
   bindActions(root, {
-    build: (_, b) => busy(b, async () => { try { await buildRun(month); toast(L('اتحسبت الرواتب', 'Payroll calculated')); } catch (e) { toastErr(e); } }),
+    build: (_, b) => busy(b, async () => { try { await buildRun(month); await loadPrivs(); toast(L('اتحسبت الرواتب', 'Payroll calculated')); } catch (e) { toastErr(e); } }),
     approve: async (_, b) => {
       const ok = await confirmDialog({ title: L('اعتماد الرواتب', 'Approve payroll'), message: L('القسائم هتظهر لكل موظف ويوصله إشعار. تكمّل؟', 'Payslips become visible and employees are notified. Continue?'), okText: L('اعتماد', 'Approve'), okClass: 'btn-ok' });
       if (ok) busy(b, async () => { try { await setRunStatus(month, 'approved'); toast(L('تم الاعتماد', 'Approved')); } catch (e) { toastErr(e); } });
@@ -115,6 +122,7 @@ export default async function render(root) {
   });
   root.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { month = addMonths(month, Number(b.dataset.m)); subscribe(); });
   subscribe();
+  loadPrivs();
   drawAdvances();
   return () => unsubs.forEach(u => u());
 }

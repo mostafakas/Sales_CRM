@@ -13,7 +13,7 @@
  */
 
 const PROJECT_ID = 'almaster-b8c18';
-const WEB_API_KEY = 'AIzaSyCXyuT529aGwiS5j_RPxW_zEeAtkYc7JlM'; // public web key (same as in the site)
+const WEB_API_KEY = 'AIzaSyCXyuT529aGwiS5j_RPxW_zEeAtkYc7JlM'; // public web key — only a fallback; tokens are verified with Google's public keys
 const FROM_NAME = 'AL MASTER HR';
 const REPLY_TO = 'almaster.hr@outlook.com'; // replies to system emails land in HR's Outlook
 const HR_ROLES = ['hr', 'supervisor', 'admin'];
@@ -43,7 +43,9 @@ function doPost(e) {
     const msg = String((err && err.message) || err);
     console.error(body.action, msg);
     const known = ['unauthenticated', 'forbidden', 'not-found', 'no-login', 'no-recovery-email', 'not-configured', 'bad-request', 'email-taken'];
-    return json_({ ok: false, error: known.indexOf(msg) >= 0 ? msg : 'server-error', detail: known.indexOf(msg) >= 0 ? '' : msg.slice(0, 300) });
+    const code = msg.split(':')[0];
+    if (known.indexOf(code) >= 0) return json_({ ok: false, error: code, detail: msg.slice(code.length + 1, 300) });
+    return json_({ ok: false, error: 'server-error', detail: msg.slice(0, 300) });
   }
 }
 
@@ -164,17 +166,66 @@ function rename_(b) {
 
 // ---------------------------------------------------------------- identity & Firestore (service account)
 function caller_(idToken) {
-  if (!idToken) throw new Error('unauthenticated');
-  const r = UrlFetchApp.fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + WEB_API_KEY, {
-    method: 'post', contentType: 'application/json', payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions: true
-  });
-  if (r.getResponseCode() !== 200) throw new Error('unauthenticated');
-  const u = (JSON.parse(r.getContentText()).users || [])[0];
-  if (!u || !u.email) throw new Error('unauthenticated');
-  const email = String(u.email).toLowerCase();
+  if (!idToken) throw new Error('unauthenticated:no-token');
+  let email = '';
+  try { email = verifyIdToken_(idToken); }
+  catch (e) {
+    // fallback: ask Firebase directly (works when the web API key is not restricted to your site)
+    const r = UrlFetchApp.fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + WEB_API_KEY, {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions: true
+    });
+    const u = r.getResponseCode() === 200 ? (JSON.parse(r.getContentText()).users || [])[0] : null;
+    if (!u || !u.email) throw new Error('unauthenticated:' + String(e.message || e).replace(/^unauthenticated:/, '') + ' / lookup ' + r.getResponseCode());
+    email = String(u.email).toLowerCase();
+  }
   const p = getDoc_('users/' + email);
   if (!p || p.isSuspended === true) throw new Error('forbidden');
   return { email: email, role: String(p.role || '').toLowerCase() };
+}
+
+// ---- Firebase ID token verification (RS256 against Google's public keys) — no API key needed
+function b64urlBytes_(s) { s = String(s).replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Utilities.base64Decode(s); }
+function b64urlJson_(s) { return JSON.parse(Utilities.newBlob(b64urlBytes_(s)).getDataAsString('UTF-8')); }
+function bytesToHex_(b) { return b.map(x => ('0' + ((x + 256) % 256).toString(16)).slice(-2)).join(''); }
+function modPow_(base, exp, mod) {
+  let r = 1n; base %= mod;
+  while (exp > 0n) { if (exp & 1n) r = (r * base) % mod; base = (base * base) % mod; exp >>= 1n; }
+  return r;
+}
+function firebaseKeys_(force) {
+  const cache = CacheService.getScriptCache();
+  const hit = !force && cache.get('fb_jwks');
+  if (hit) return JSON.parse(hit);
+  const r = UrlFetchApp.fetch('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com', { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('unauthenticated:keys-' + r.getResponseCode());
+  const keys = {};
+  (JSON.parse(r.getContentText()).keys || []).forEach(k => { keys[k.kid] = { n: k.n, e: k.e }; });
+  cache.put('fb_jwks', JSON.stringify(keys), 3600);
+  return keys;
+}
+function verifyIdToken_(token) {
+  const parts = String(token).split('.');
+  if (parts.length !== 3) throw new Error('unauthenticated:format');
+  const header = b64urlJson_(parts[0]), claims = b64urlJson_(parts[1]);
+  const now = Math.floor(Date.now() / 1000);
+  if (header.alg !== 'RS256') throw new Error('unauthenticated:alg');
+  if (claims.aud !== PROJECT_ID || claims.iss !== 'https://securetoken.google.com/' + PROJECT_ID) throw new Error('unauthenticated:project');
+  if (!claims.sub || !claims.email) throw new Error('unauthenticated:claims');
+  if (Number(claims.exp) < now - 30) throw new Error('unauthenticated:expired');
+  if (Number(claims.iat) > now + 300) throw new Error('unauthenticated:clock');
+  let key = firebaseKeys_()[header.kid];
+  if (!key) key = firebaseKeys_(true)[header.kid];
+  if (!key) throw new Error('unauthenticated:kid');
+  const n = BigInt('0x' + bytesToHex_(b64urlBytes_(key.n)));
+  const e = BigInt('0x' + bytesToHex_(b64urlBytes_(key.e)));
+  const sig = BigInt('0x' + bytesToHex_(b64urlBytes_(parts[2])));
+  const k = bytesToHex_(b64urlBytes_(key.n)).replace(/^(00)+/, '').length / 2;
+  const em = modPow_(sig, e, n).toString(16).padStart(k * 2, '0');
+  const digest = bytesToHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, parts[0] + '.' + parts[1], Utilities.Charset.US_ASCII));
+  const t = '3031300d060960864801650304020105000420' + digest;
+  const expected = '0001' + 'ff'.repeat(k - 3 - t.length / 2) + '00' + t;
+  if (em !== expected) throw new Error('unauthenticated:signature');
+  return String(claims.email).toLowerCase();
 }
 
 function lookupLogin_(email) {

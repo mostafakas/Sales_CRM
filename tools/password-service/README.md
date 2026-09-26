@@ -67,6 +67,7 @@ Google Cloud Console ← IAM & Admin ← **Service accounts** ← `firebase-admi
 | الرسالة | الحل |
 |---|---|
 | «الخدمة وصلت بس مفتاح Firebase مش شغال» | `SERVICE_ACCOUNT` ناقص أو متنسخ ناقص. انسخ ملف الـ JSON كله من أول `{` لآخر `}`. |
+| «خدمة كلمات المرور ما قدرتش تتأكد من حسابك» | انسخ آخر `Code.gs` وانشره كـ **New version** من Manage deployments. |
 | «تعذّر الوصول لخدمة كلمات المرور» | الرابط غلط أو Who has access مش Anyone. |
 | «الموظف ملوش إيميل استعادة» | ضيف له إيميل Outlook من ملفه. |
 | «ملوش حساب دخول» | الموظف موجود في السيستم بس مش موجود في Firebase Authentication. |

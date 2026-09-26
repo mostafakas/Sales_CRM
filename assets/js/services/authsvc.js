@@ -25,7 +25,7 @@ export function toLogin(input, domain) {
 export const siteUrl = () => location.origin + location.pathname.replace(/[^/]*$/, '');
 
 const ERRORS = {
-  'unauthenticated': ['انتهت الجلسة. سجّل دخول تاني.', 'Your session expired. Please sign in again.'],
+  'unauthenticated': ['خدمة كلمات المرور ما قدرتش تتأكد من حسابك. حدّث كود الخدمة في Apps Script (Deploy ← Manage deployments ← New version) وجرّب تاني.', 'The password service could not verify your account. Update the service code in Apps Script (Deploy → Manage deployments → New version) and try again.'],
   'forbidden': ['مش مسموح لك بالعملية دي.', 'You are not allowed to do this.'],
   'not-found': ['الموظف مش موجود.', 'Employee not found.'],
   'no-login': ['الموظف ده ملوش حساب دخول في Firebase Authentication.', 'This employee has no login in Firebase Authentication.'],
@@ -50,7 +50,8 @@ export async function callService(action, payload = {}, { signedIn = true } = {}
   }
   if (!res || !res.ok) {
     const [ar, en] = ERRORS[res && res.error] || ERRORS['server-error'];
-    const e = userError(ar, en + (res && res.detail ? ` (${res.detail})` : ''));
+    const d = res && res.detail ? ` (${res.detail})` : '';
+    const e = userError(ar + d, en + d);
     e.code = res && res.error;
     throw e;
   }

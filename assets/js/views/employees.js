@@ -134,6 +134,7 @@ export async function openEditor(email) {
           <div class="field span-2"><label>${L('البدلات الثابتة', 'Fixed allowances')}</label><div id="allow" class="col gap-8"></div><button type="button" class="btn btn-sm btn-soft" id="add-allow" style="align-self:flex-start"><i class="fas fa-plus"></i> ${L('إضافة بدل', 'Add allowance')}</button></div>
           <div class="field"><label>${L('رقم الحساب البنكي', 'Bank account')}</label><input class="input" name="bank" dir="ltr" value="${esc(priv.bank || '')}"></div>
           <div class="field"><label>InstaPay</label><input class="input" name="instapay" dir="ltr" value="${esc(priv.instapay || '')}"></div>
+          <div class="span-2 alert info" id="paysum"></div>
           <p class="span-2 xs muted"><i class="fas fa-lock"></i> ${L('بيانات الراتب والبنك محفوظة في مكان منفصل ومحدش يشوفها غير الموظف نفسه وHR والمالية.', 'Salary and bank data are stored separately — visible only to the employee, HR and finance.')}</p>
         </div>
         <div data-pane="access" class="col gap-16 hidden">
@@ -168,7 +169,17 @@ export async function openEditor(email) {
     allowBox.appendChild(row);
   };
   (sal.allowances || []).forEach(addAllow);
-  m.$('#add-allow').onclick = () => addAllow();
+  m.$('#add-allow').onclick = () => { addAllow(); paySum(); };
+  // what payroll will use, live
+  const paySum = () => {
+    const basic = Number(f.basic.value || 0), fixed = Number(f.fixedDeductions.value || 0);
+    const al = [...allowBox.children].reduce((t, r) => t + Number(r.querySelector('[data-aa]').value || 0), 0);
+    m.$('#paysum').innerHTML = `<i class="fas fa-calculator"></i><div>${L('في الرواتب:', 'In payroll:')} <b class="num">${esc(money(basic, false))}</b> ${L('أساسي', 'basic')} + <b class="num">${esc(money(al, false))}</b> ${L('بدلات', 'allowances')} = <b class="num">${esc(money(basic + al, false))}</b> ${L('إجمالي', 'gross')}${fixed ? ` − <b class="num">${esc(money(fixed, false))}</b> ${L('ثابتة', 'fixed')}` : ''}
+      <div class="xs muted mt-4">${L('لو مسودة رواتب الشهر محسوبة قبل كده، اضغط «إعادة الحساب» في صفحة الرواتب بعد الحفظ.', 'If this month’s payroll draft was already calculated, press "Recalculate" on the Payroll page after saving.')}</div></div>`;
+  };
+  m.$('[data-pane=pay]').addEventListener('input', paySum);
+  m.$('[data-pane=pay]').addEventListener('click', (e) => { if (e.target.closest('.btn-ghost')) setTimeout(paySum, 0); });
+  paySum();
   const teamBox = m.$('#team-box');
   const drawTeam = () => {
     if (f.role.value !== 'leader' || isNew) { teamBox.innerHTML = ''; return; }
