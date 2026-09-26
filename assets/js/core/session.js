@@ -70,7 +70,10 @@ export function requireSession({ onProfileChange } = {}) {
         session.team = teamDocs.filter(x => !x.isSuspended).map(x => x.id);
         await syncClock();
         watch(ref('users', session.email), (d) => {
-          if (!d) return;
+          if (!d) { // profile removed or username changed — confirm with a fresh read before signing out
+            if (!window.__amRenaming) setTimeout(() => read('users', session.email).then(x => { if (!x && !window.__amRenaming) forceLogout('account-changed'); }).catch(() => {}), 1500);
+            return;
+          }
           if (d.isSuspended) { forceLogout('suspended'); return; }
           if (d.sessionId && String(d.sessionId).startsWith('reset_') && d.sessionId !== localSessionId()) { forceLogout('password-reset'); return; }
           if (policy.singleSession !== false && d.sessionId && localSessionId() && d.sessionId !== localSessionId()) { forceLogout('other-device'); return; }
@@ -88,6 +91,7 @@ function applyProfile(p) {
 }
 
 export async function forceLogout(reason) {
+  if (window.__amLoggingOut) return; window.__amLoggingOut = true;
   try { sessionStorage.setItem('am_logout_reason', reason || ''); } catch {}
   try { await signOut(auth); } catch {}
   location.replace('index.html');
@@ -99,6 +103,8 @@ export async function logout() {
 export const logoutReasonText = (r) => ({
   'suspended': L('الحساب ده موقوف. تواصل مع الموارد البشرية.', 'This account is suspended. Please contact HR.'),
   'other-device': L('تم تسجيل الدخول بحسابك من جهاز تاني، فاتقفلت الجلسة هنا.', 'Your account signed in on another device, so this session was closed.'),
+  'renamed': L('اسم المستخدم بتاعك اتغيّر. ادخل بالاسم الجديد وبنفس كلمة المرور.', 'Your username changed. Sign in with the new one — your password is the same.'),
+  'account-changed': L('بيانات حسابك اتغيّرت. سجّل دخول تاني، ولو اسم المستخدم اتغيّر استخدم الجديد.', 'Your account details changed. Please sign in again (with your new username if it changed).'),
   'password-reset': L('الموارد البشرية عملت كلمة مرور مؤقتة لحسابك. ادخل بيها وهيُطلب منك تختار كلمة مرور جديدة.', 'HR set a temporary password for your account. Sign in with it and you will be asked to choose a new one.'),
   'no-profile': L('الحساب ده لسه ما اتفعّلش. تواصل مع الموارد البشرية.', 'This account is not activated yet. Please contact HR.')
 }[r] || '');

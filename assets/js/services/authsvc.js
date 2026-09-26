@@ -31,6 +31,7 @@ const ERRORS = {
   'no-login': ['الموظف ده ملوش حساب دخول في Firebase Authentication.', 'This employee has no login in Firebase Authentication.'],
   'no-recovery-email': ['الموظف ملوش إيميل استعادة. ضيفه من ملفه الأول.', 'This employee has no recovery email. Add it in their profile first.'],
   'not-configured': ['خدمة كلمات المرور متركّبة بس ناقصها مفتاح الخدمة (SERVICE_ACCOUNT).', 'The password service is missing its SERVICE_ACCOUNT key.'],
+  'email-taken': ['الإيميل ده عليه حساب دخول تاني بالفعل.', 'Another login already uses this email.'],
   'server-error': ['حصلت مشكلة في خدمة كلمات المرور.', 'The password service hit an error.']
 };
 

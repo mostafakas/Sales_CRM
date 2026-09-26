@@ -174,7 +174,8 @@ service cloud.firestore {
     match /logs/{id} {
       allow read: if active() && (resource.data.user == me() || isHR() || resource.data.get('leaderEmail', '') == me());
       allow create: if active() && (request.resource.data.user == me() || isHR()) && request.resource.data.timestamp == request.time;
-      allow update: if false;
+      // only re-pointed when an admin changes someone's username
+      allow update: if isAdmin() && onlyChanged(['user', 'leaderEmail']);
       allow delete: if isAdmin();
     }
     match /schedules/{id} {
@@ -213,6 +214,7 @@ service cloud.firestore {
       allow read: if active() && (resource.data.owner == me() || isHR() || isFinance() || resource.data.get('leaderEmail', '') == me());
       allow create: if active() && request.resource.data.owner == me() && request.resource.data.data is string && request.resource.data.data.size() < 1000000;
       allow delete: if active() && (resource.data.owner == me() || isHR());
+      allow update: if isAdmin() && onlyChanged(['owner', 'leaderEmail']);
     }
 
     // ---------- leave balances ----------
@@ -223,6 +225,7 @@ service cloud.firestore {
     match /balance_ledger/{id} {
       allow read: if active() && (resource.data.email == me() || isHR() || isFinance());
       allow create: if isHR() && othersOnly() && request.resource.data.by == me();
+      allow update: if isAdmin() && onlyChanged(['email']);
     }
 
     // ---------- money ----------

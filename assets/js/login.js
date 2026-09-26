@@ -32,6 +32,7 @@ setIcon(); byId('theme-btn').onclick = () => { toggleTheme(); setIcon(); };
 // reason for the last forced sign-out
 try {
   const r = sessionStorage.getItem('am_logout_reason');
+  const pre = sessionStorage.getItem('am_prefill'); if (pre) { byId('email').value = pre; sessionStorage.removeItem('am_prefill'); }
   if (r) { const el = byId('reason'); el.textContent = logoutReasonText(r); el.classList.toggle('hidden', !el.textContent); sessionStorage.removeItem('am_logout_reason'); }
 } catch {}
 

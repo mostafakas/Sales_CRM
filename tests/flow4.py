@@ -98,8 +98,11 @@ a.shot('f4-settings', True)
 # 8) forced logout after reset + reason on sign-in page
 a.login('emp2@almaster.tech'); pg.wait_for_timeout(500)
 pg.evaluate("""() => { const fs = JSON.parse(localStorage.getItem('mockfs')); fs['users/emp2@almaster.tech'].sessionId = 'reset_1'; localStorage.setItem('mockfs', JSON.stringify(fs)); window.dispatchEvent(new StorageEvent('storage', { key: 'mockfs' })); }""")
-pg.reload(); pg.wait_for_timeout(1500)
-ok('index.html' in pg.url and 'مؤقتة' in pg.locator('#reason').inner_text(), 'reset signs the user out with a clear reason')
+pg.wait_for_timeout(800)
+if 'index.html' not in pg.url:
+    pg.reload()
+pg.wait_for_url('**/index.html**', timeout=8000); pg.wait_for_timeout(600)
+print('REASON:', pg.url, pg.locator('#reason').inner_text()); ok('index.html' in pg.url and 'مؤقتة' in pg.locator('#reason').inner_text(), 'reset signs the user out with a clear reason')
 
 errs = a.dump_errors('flow4')
 a.close()

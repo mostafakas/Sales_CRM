@@ -8,6 +8,8 @@ import { allPeople, onDirectory, departments, person, nameOf } from '../services
 import { getBalance, adjustBalance, remaining, emptyBalance, balanceId } from '../services/requests.js';
 import { personMonthView } from './attendance.js';
 import { publicConfig, toLogin, callService } from '../services/authsvc.js';
+import { renameAccount, renameStepText } from '../services/rename.js';
+import { forceLogout } from '../core/session.js';
 import { balanceTable } from './profile.js';
 import { requestCard, showRequestDetails } from './request-card.js';
 
@@ -135,6 +137,10 @@ export async function openEditor(email) {
           <p class="span-2 xs muted"><i class="fas fa-lock"></i> ${L('بيانات الراتب والبنك محفوظة في مكان منفصل ومحدش يشوفها غير الموظف نفسه وHR والمالية.', 'Salary and bank data are stored separately — visible only to the employee, HR and finance.')}</p>
         </div>
         <div data-pane="access" class="col gap-16 hidden">
+          ${!isNew && isAdmin() ? `<div class="pw-box"><div class="row gap-12"><span class="icon-tile"><i class="fas fa-user-pen"></i></span><div class="grow"><b>${L('تغيير اسم المستخدم', 'Change username')}</b>
+              <div class="xs muted">${L('بينقل كل بياناته (حضور، طلبات، أرصدة، رواتب) لاسم الدخول الجديد. كلمة المرور زي ما هي.', 'Moves all their data (attendance, requests, balances, payroll) to the new sign-in name. The password stays the same.')}</div></div></div>
+              <div class="row gap-8 mt-12"><input class="input grow" id="rn-to" dir="ltr" autocapitalize="none" spellcheck="false" placeholder="name@outlook.com"><button type="button" class="btn btn-soft" id="rn"><i class="fas fa-right-left"></i> ${L('تغيير', 'Change')}</button></div>
+              <div class="xs muted mt-8" id="rn-out"></div></div>` : ''}
           ${canReset ? `<div class="pw-box"><div class="row gap-12"><span class="icon-tile"><i class="fas fa-key"></i></span><div class="grow"><b>${L('كلمة المرور', 'Password')}</b>
               <div class="xs muted">${L('بيعمل كلمة مرور مؤقتة، والموظف لازم يختار كلمة جديدة أول ما يدخل. بيخرج من كل الأجهزة.', 'Creates a temporary password; they must choose a new one at sign-in. Signs them out everywhere.')}</div></div></div>
               <div class="row-wrap gap-12 mt-12"><button type="button" class="btn btn-soft" id="rp"><i class="fas fa-key"></i> ${L('ريسيت الباسورد', 'Reset password')}</button>
@@ -177,6 +183,32 @@ export async function openEditor(email) {
   });
   const uh = m.$('#uhint');
   if (uh && domain) f.email.oninput = () => { const v = toLogin(f.email.value, domain); uh.innerHTML = v ? `${L('اسم الدخول:', 'Sign-in name:')} <b dir="ltr">${esc(v)}</b>` : ''; };
+  const rn = m.$('#rn');
+  if (rn) rn.onclick = async () => {
+    const to = toLogin(m.$('#rn-to').value, domain);
+    const out = m.$('#rn-out');
+    if (!to) { m.$('#rn-to').focus(); return; }
+    const self = email === session.email;
+    const ok = await confirmDialog({
+      title: L('تغيير اسم المستخدم', 'Change username'), okText: L('تغيير', 'Change'),
+      message: L(`من:  ${email}\nإلى:  ${to}\n\nكل بيانات الموظف هتتنقل للاسم الجديد، وكلمة المرور مش هتتغير.${self ? '\nده حسابك إنت، فهتخرج بعد التغيير وتدخل بالاسم الجديد.' : '\nلو هو داخل دلوقتي هيخرج ويدخل بالاسم الجديد.'}`,
+        `From:  ${email}\nTo:  ${to}\n\nAll of this employee's data moves to the new name; the password does not change.${self ? '\nThis is your own account: you will be signed out and sign in with the new name.' : '\nIf they are signed in, they will be signed out and use the new name.'}`)
+    });
+    if (!ok) return;
+    if (self) { window.__amRenaming = true; try { sessionStorage.setItem('am_prefill', to); } catch {} }
+    await busy(rn, async () => {
+      try {
+        await renameAccount(email, to, (step, done, total) => { out.textContent = renameStepText(step) + (total ? ` ${done}/${total}` : ''); }, session.email);
+        if (self) { await forceLogout('renamed'); return; }
+        m.close(); toast(L('تم تغيير اسم المستخدم', 'Username changed'), to);
+      } catch (ex) {
+        window.__amRenaming = false;
+        out.textContent = '';
+        if (ex && ex.code === 'email-taken') toast(L('الاسم ده مستخدم', 'Name in use'), L('الإيميل ده عليه حساب دخول تاني بالفعل.', 'Another login already uses this email.'), 'bad');
+        else toastErr(ex);
+      }
+    });
+  };
   const rp = m.$('#rp');
   if (rp) rp.onclick = async () => {
     const notify = !!(m.$('#rp-mail') && m.$('#rp-mail').checked);

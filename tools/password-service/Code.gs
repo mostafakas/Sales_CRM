@@ -5,6 +5,7 @@
  *   • reset   — HR/admin sets a temporary password for an employee (they must change it at next sign-in)
  *   • forgot  — "Forgot password?" on the sign-in page: emails a reset link to the employee's recovery (Outlook) email
  *   • welcome — emails a new employee their username + temporary password
+ *   • renameCheck / rename — admin changes an account's username (login email); the site moves the data first
  *   • ping    — health check used by Settings → System
  *
  * Setup: see README.md in this folder. Secrets live in Script Properties, never in this file:
@@ -14,6 +15,7 @@
 const PROJECT_ID = 'almaster-b8c18';
 const WEB_API_KEY = 'AIzaSyCXyuT529aGwiS5j_RPxW_zEeAtkYc7JlM'; // public web key (same as in the site)
 const FROM_NAME = 'AL MASTER HR';
+const REPLY_TO = 'almaster.hr@outlook.com'; // replies to system emails land in HR's Outlook
 const HR_ROLES = ['hr', 'supervisor', 'admin'];
 const FORGOT_COOLDOWN_SEC = 600;  // one reset email per account every 10 minutes
 const FORGOT_DAILY_CAP = 60;      // keeps Gmail's daily sending quota safe
@@ -33,12 +35,14 @@ function doPost(e) {
       case 'forgot': return json_(forgot_(body));
       case 'reset': return json_(reset_(body));
       case 'welcome': return json_(welcome_(body));
+      case 'renameCheck': return json_(renameCheck_(body));
+      case 'rename': return json_(rename_(body));
       default: return json_({ ok: false, error: 'unknown-action' });
     }
   } catch (err) {
     const msg = String((err && err.message) || err);
     console.error(body.action, msg);
-    const known = ['unauthenticated', 'forbidden', 'not-found', 'no-login', 'no-recovery-email', 'not-configured', 'bad-request'];
+    const known = ['unauthenticated', 'forbidden', 'not-found', 'no-login', 'no-recovery-email', 'not-configured', 'bad-request', 'email-taken'];
     return json_({ ok: false, error: known.indexOf(msg) >= 0 ? msg : 'server-error', detail: known.indexOf(msg) >= 0 ? '' : msg.slice(0, 300) });
   }
 }
@@ -125,6 +129,39 @@ function forgot_(b) {
   return neutral;
 }
 
+// ---- username change (admin only). The site copies the Firestore data to the new key first, then calls rename.
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+function renamePair_(b) {
+  const me = caller_(b.idToken);
+  if (me.role !== 'admin') throw new Error('forbidden');
+  const from = norm_(b.from), to = norm_(b.to);
+  if (!from || !to || from === to || !EMAIL_RE.test(to)) throw new Error('bad-request');
+  return { from: from, to: to };
+}
+const authUser_ = (email) => (identity_('accounts:lookup', { email: [email] }).users || [])[0] || null;
+
+function renameCheck_(b) {
+  const x = renamePair_(b);
+  if (!getDoc_('users/' + x.from)) throw new Error('not-found');
+  if (!authUser_(x.from)) throw new Error('no-login');
+  if (authUser_(x.to)) throw new Error('email-taken');
+  const existing = getDoc_('users/' + x.to);
+  if (existing && existing.renamedFrom !== x.from) throw new Error('email-taken');
+  return { ok: true };
+}
+
+function rename_(b) {
+  const x = renamePair_(b);
+  const copy = getDoc_('users/' + x.to);
+  if (!copy || copy.renamedFrom !== x.from) throw new Error('bad-request'); // data must be copied first
+  const fromU = authUser_(x.from), toU = authUser_(x.to);
+  if (fromU && toU) throw new Error('email-taken');
+  if (fromU) identity_('accounts:update', { localId: fromU.localId, email: x.to, emailVerified: false });
+  else if (!toU) throw new Error('no-login');
+  deleteDoc_('users/' + x.from); // safe to repeat
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------- identity & Firestore (service account)
 function caller_(idToken) {
   if (!idToken) throw new Error('unauthenticated');
@@ -174,6 +211,11 @@ function patchDoc_(path, data) {
     payload: JSON.stringify({ fields: toFields_(data) }), muteHttpExceptions: true
   });
   if (r.getResponseCode() >= 300) throw new Error('firestore patch ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 200));
+}
+
+function deleteDoc_(path) {
+  const r = UrlFetchApp.fetch(FS_BASE + fsPath_(path), { method: 'delete', headers: { Authorization: 'Bearer ' + token_() }, muteHttpExceptions: true });
+  if (r.getResponseCode() >= 300 && r.getResponseCode() !== 404) throw new Error('firestore delete ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 200));
 }
 
 function fromValue_(v) {
@@ -226,10 +268,15 @@ function token_() {
 }
 
 // ---------------------------------------------------------------- helpers
+/** The recovery (Outlook) email; when none is set and the username itself is a real mailbox
+ *  (not under the internal login domain), the username is used. */
 function recoveryEmail_(email) {
   const p = getDoc_('employees_private/' + email);
   const v = p && String(p.contactEmail || '').trim();
-  return v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) ? v : '';
+  if (v && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return v;
+  const pub = getDoc_('settings/public') || {};
+  const dom = String(pub.loginDomain || '').replace(/^@/, '').toLowerCase();
+  return dom && email.endsWith('@' + dom) ? '' : email;
 }
 function tempPassword_() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -264,7 +311,7 @@ function sendCredentials_(to, name, username, password, origin, isReset) {
     (url ? '<p><a href="' + escHtml_(url) + '" style="display:inline-block;background:#1b1bdb;color:#fff;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700">Sign in</a></p>' : '') +
     '<p style="color:#5b6479;font-size:13px">You will be asked to choose your own password right after signing in.</p>' +
     '<p dir="rtl" style="text-align:right;color:#5b6479;font-size:13px;border-top:1px solid #eee;padding-top:12px">ادخل باسم المستخدم وكلمة المرور المؤقتة اللي فوق، وهيُطلب منك تختار كلمة مرور جديدة أول ما تدخل.</p>');
-  MailApp.sendEmail({ to: to, subject: title, htmlBody: html, name: FROM_NAME });
+  MailApp.sendEmail({ to: to, subject: title, htmlBody: html, name: FROM_NAME, replyTo: REPLY_TO });
 }
 function sendResetLink_(to, name, username, link) {
   const title = 'Reset your password / استعادة كلمة المرور';
@@ -274,5 +321,5 @@ function sendResetLink_(to, name, username, link) {
     '<p><a href="' + escHtml_(link) + '" style="display:inline-block;background:#1b1bdb;color:#fff;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700">Choose a new password</a></p>' +
     '<p style="color:#5b6479;font-size:13px">The link works once and expires in about an hour. If you didn\'t ask for this, ignore this email — your password stays the same.</p>' +
     '<p dir="rtl" style="text-align:right;color:#5b6479;font-size:13px;border-top:1px solid #eee;padding-top:12px">اضغط الزرار اللي فوق عشان تختار كلمة مرور جديدة. لو ما طلبتش ده، تجاهل الإيميل.</p>');
-  MailApp.sendEmail({ to: to, subject: title, htmlBody: html, name: FROM_NAME });
+  MailApp.sendEmail({ to: to, subject: title, htmlBody: html, name: FROM_NAME, replyTo: REPLY_TO });
 }
