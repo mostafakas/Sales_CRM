@@ -45,19 +45,26 @@ export {
 // ---- small helpers ----
 export const ref = (path, id) => id === undefined ? doc(db, path) : doc(db, path, id);
 export const col = (path) => collection(db, path);
+// Firebase's free daily quota ran out → tell the app once so it can explain it instead of spinning
+export const isQuotaError = (e) => /resource-exhausted|quota/i.test(String((e && e.code) || '') + ' ' + String((e && e.message) || ''));
+const quotaCheck = (e) => { if (isQuotaError(e)) window.dispatchEvent(new CustomEvent('am:quota')); return e; };
 export async function read(path, id) {
-  const s = await getDoc(id === undefined ? doc(db, path) : doc(db, path, id));
-  return s.exists() ? { id: s.id, ...s.data() } : null;
+  try {
+    const s = await getDoc(id === undefined ? doc(db, path) : doc(db, path, id));
+    return s.exists() ? { id: s.id, ...s.data() } : null;
+  } catch (e) { throw quotaCheck(e); }
 }
 export async function list(q) {
-  const s = await getDocs(q);
-  return s.docs.map(d => ({ id: d.id, ...d.data() }));
+  try {
+    const s = await getDocs(q);
+    return s.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { throw quotaCheck(e); }
 }
 export function watch(target, cb, onErr) {
   return onSnapshot(target, snap => {
     if ('docs' in snap) cb(snap.docs.map(d => ({ id: d.id, ...d.data() })), snap);
     else cb(snap.exists() ? { id: snap.id, ...snap.data() } : null, snap);
-  }, err => { console.warn('[watch]', err && err.message); onErr && onErr(err); });
+  }, err => { quotaCheck(err); console.warn('[watch]', err && err.message); onErr && onErr(err); });
 }
 export const toMs = (v) => v == null ? null : (typeof v === 'number' ? v : (v.toMillis ? v.toMillis() : (v.seconds != null ? v.seconds * 1000 : null)));
 
@@ -67,7 +74,7 @@ export const toMs = (v) => v == null ? null : (typeof v === 'number' ? v : (v.to
  */
 export function settle(p, ms = 5000) {
   let late = false;
-  p.catch(e => { if (late) window.dispatchEvent(new CustomEvent('am:late-error', { detail: e })); });
+  p.catch(e => { quotaCheck(e); if (late) window.dispatchEvent(new CustomEvent('am:late-error', { detail: e })); });
   return Promise.race([p, new Promise(res => setTimeout(() => { late = true; res(); }, ms))]);
 }
 

@@ -73,11 +73,13 @@ byId('login-form').onsubmit = async (e) => {
   if (!email || !pass) { showError(L('اكتب اسم المستخدم وكلمة المرور.', 'Enter your username and password.')); return; }
   if (!email.includes('@')) { showError(L('اكتب اسم المستخدم كامل زي ما HR بعتهولك (مثلاً name@company.com).', 'Type your full username as HR sent it (e.g. name@company.com).')); return; }
   signingIn = true;
+  const slowT = setTimeout(() => showError(L('الدخول واخد وقت أطول من العادي. لو فضل كده، غالباً الحد اليومي المجاني لـ Firebase خلص — بيتجدد كل يوم حوالي 10 الصبح بتوقيت القاهرة.', 'Signing in is taking longer than usual. If it stays like this, Firebase’s free daily limit has probably run out — it resets daily around 10:00 AM Cairo time.')), 12000);
+  window.addEventListener('am:quota', () => showError(L('الحد اليومي المجاني لـ Firebase خلص. السيستم هيرجع لوحده لما الحد يتجدد (حوالي 10 الصبح بتوقيت القاهرة)، أو الأدمن يحوّل المشروع لخطة Blaze.', 'Firebase’s free daily limit has run out. The system comes back when it resets (around 10:00 AM Cairo time), or the admin can switch to the Blaze plan.')), { once: true });
   btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;border-width:2px;border-color:rgba(255,255,255,.3);border-top-color:#fff"></span>';
   try {
     await signInWithEmailAndPassword(auth, email, pass);
   } catch (err) {
-    signingIn = false; btn.disabled = false; btn.innerHTML = btnText;
+    clearTimeout(slowT); signingIn = false; btn.disabled = false; btn.innerHTML = btnText;
     const code = err && err.code || '';
     if (code.includes('too-many-requests')) showError(L('محاولات كتير غلط. استنى شوية وجرب تاني.', 'Too many attempts. Please wait and try again.'));
     else if (code.includes('network')) showError(L('مفيش اتصال بالإنترنت.', 'No internet connection.'));
@@ -91,8 +93,10 @@ byId('login-form').onsubmit = async (e) => {
     // write the new session id BEFORE leaving the page, so other devices get signed out cleanly
     await updateDoc(ref('users', email), { sessionId: newSessionId(), lastLoginAt: serverTimestamp() });
     await Promise.race([addDoc(col('activity'), { by: email, name: p.name || email, action: 'auth.login', target: '', detail: (navigator.userAgentData && navigator.userAgentData.platform) || (/Mobi/.test(navigator.userAgent) ? 'mobile' : 'desktop'), at: serverTimestamp() }).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
+    clearTimeout(slowT);
     location.replace('app.html');
   } catch (err) {
+    clearTimeout(slowT);
     signingIn = false; btn.disabled = false; btn.innerHTML = btnText;
     showError(err.ui || L('تعذّر تحميل بيانات حسابك. حاول تاني.', 'Could not load your account. Please try again.'));
   }

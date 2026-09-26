@@ -7,7 +7,7 @@ import { toast, toastErr, modal, avatar } from './core/ui.js';
 import { startDirectory } from './services/directory.js';
 import { startNotifications, onNotifications, unreadCount } from './services/notify.js';
 import { watchInbox } from './services/requests.js';
-import { auth, updatePassword, updateDoc, ref, read } from './core/fb.js';
+import { auth, updatePassword, updateDoc, ref, read, isQuotaError } from './core/fb.js';
 
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
@@ -195,11 +195,31 @@ async function boot() {
   byId('menu-btn').onclick = () => document.body.classList.toggle('nav-open');
   byId('scrim').onclick = () => document.body.classList.remove('nav-open');
 
+  // Firebase answers "quota exceeded" → explain it (instead of an endless spinner)
+  let quota = false;
+  const quotaMsg = () => `<div style="color:#fff;text-align:center;padding:24px;max-width:520px;margin:auto">
+      <i class="fas fa-gauge-high" style="font-size:34px;opacity:.85"></i>
+      <h2 style="font-size:19px;margin-top:14px">${L('الحد اليومي المجاني لـ Firebase خلص', "Firebase's free daily limit has been reached")}</h2>
+      <p style="opacity:.8;margin-top:10px;line-height:1.8">${L('السيستم هيرجع يشتغل لوحده لما الحد يتجدد (كل يوم الساعة 10 الصبح بتوقيت القاهرة تقريباً). عشان يرجع فوراً، الأدمن يحوّل المشروع لخطة Blaze من Firebase Console (بتدفع بس لو عديت الحد المجاني).', 'The system comes back by itself when the limit resets (daily, around 10:00 AM Cairo time). To restore it now, the admin can switch the project to the Blaze plan in the Firebase Console (you pay only beyond the free limit).')}</p>
+      <button class="btn btn-on-navy mt-16" onclick="location.reload()"><i class="fas fa-rotate"></i> ${L('إعادة المحاولة', 'Retry')}</button></div>`;
+  window.addEventListener('am:quota', () => {
+    if (quota) return; quota = true;
+    const sp = byId('splash');
+    if (sp) { sp.innerHTML = quotaMsg(); return; }
+    import('./core/ui.js').then(({ livePop }) => livePop({ icon: 'fa-gauge-high', cls: 'bad', title: L('الحد اليومي المجاني لـ Firebase خلص', "Firebase's free daily limit has been reached"), text: L('ممكن بعض البيانات ما تتحفظش أو ما تظهرش لحد ما الحد يتجدد.', 'Some data may not load or save until the limit resets.'), ttl: 20000 }));
+  });
+  const slow = setTimeout(() => {
+    const sp = byId('splash'); if (!sp || quota) return;
+    sp.insertAdjacentHTML('beforeend', `<div id="slow" style="position:absolute;bottom:40px;inset-inline:0;text-align:center;color:#fff;opacity:.8;font-size:13px">${L('التحميل واخد وقت أكتر من العادي. لو فضل كده، غالباً الحد اليومي المجاني لـ Firebase خلص (بيتجدد حوالي 10 الصبح بتوقيت القاهرة).', 'This is taking longer than usual. If it stays like this, Firebase’s free daily limit has probably run out (resets around 10:00 AM Cairo time).')} <a href="#" onclick="location.reload();return false" style="color:#fff;text-decoration:underline">${L('إعادة المحاولة', 'Retry')}</a></div>`);
+  }, 12000);
   try {
     await requireSession({ onProfileChange: (p) => { renderUserChip(); window.dispatchEvent(new CustomEvent('am:profile', { detail: p })); } });
     await loadPolicy();
+    clearTimeout(slow);
   } catch (e) {
+    clearTimeout(slow);
     console.error(e);
+    if (quota || isQuotaError(e)) { byId('splash').innerHTML = quotaMsg(); return; }
     byId('splash').innerHTML = `<div style="color:#fff;text-align:center;padding:24px"><b>${L('تعذّر الاتصال بالسيرفر', 'Could not reach the server')}</b><p style="opacity:.7;margin-top:8px">${esc(e && e.message || '')}</p><button class="btn btn-on-navy mt-16" onclick="location.reload()">${L('إعادة المحاولة', 'Retry')}</button></div>`;
     return;
   }

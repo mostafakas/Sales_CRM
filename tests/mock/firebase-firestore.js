@@ -131,6 +131,14 @@ function cmp(a, b) {
 }
 function runQuery(q) {
   const colPath = q.path;
+  // optional: behave like a project whose composite indexes were never published
+  if (localStorage.getItem('mock_strict_index') === '1') {
+    const ws = (q.cons || []).filter(c => c.kind === 'where');
+    const eq = ws.filter(c => c.op === '==' || c.op === 'array-contains'), rg = ws.filter(c => ['<', '<=', '>', '>='].includes(c.op));
+    const ob = (q.cons || []).filter(c => c.kind === 'orderBy');
+    if ((eq.length && rg.length) || (eq.length && ob.length) || (rg.length && ob.some(o => o.field !== rg[0].field)))
+      throw err('failed-precondition', 'The query requires an index. You can create it here: https://console.firebase.google.com/v1/r/project/x/firestore/indexes?create_composite=abc');
+  }
   let rows = Object.keys(store).filter(p => { const i = p.lastIndexOf('/'); return p.slice(0, i) === colPath; })
     .map(p => ({ path: p, id: p.slice(p.lastIndexOf('/') + 1), data: store[p] }));
   const cons = q.cons || [];
@@ -171,9 +179,9 @@ function querySnap(q, prevIds) {
   prev.forEach((_, id) => { if (!docs.some(d => d.id === id)) changes.push({ type: 'removed', doc: { id, data: () => ({}) } }); });
   return { docs, size: docs.length, empty: !docs.length, forEach: (f) => docs.forEach(f), docChanges: () => changes };
 }
-export async function getDoc(ref) { await tick(); return docSnap(ref); }
+export async function getDoc(ref) { await tick(); if (localStorage.getItem('mock_quota') === '1') throw err('resource-exhausted', 'Quota exceeded.'); return docSnap(ref); }
 export const getDocFromServer = getDoc;
-export async function getDocs(q) { await tick(); return querySnap(q); }
+export async function getDocs(q) { await tick(); return querySnap(q); } // throws like Firestore when an index is missing
 export async function setDoc(ref, data, opts) { await tick(); applySet(ref, data, opts); commit(); }
 export async function updateDoc(ref, data) { await tick(); applyUpdate(ref, data); commit(); }
 export async function deleteDoc(ref) { await tick(); applyDelete(ref); commit(); }
