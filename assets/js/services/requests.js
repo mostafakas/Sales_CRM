@@ -39,6 +39,7 @@ export function watchBalance(email, year, cb) {
 }
 /** HR manual adjustment with ledger entry */
 export async function adjustBalance(email, year, typeId, { entitled, adjustDelta = 0, note = '' }) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const id = balanceId(email, year);
   await runTransaction(db, async (tx) => {
     const r = doc(db, 'balances', id);
@@ -57,6 +58,7 @@ export async function adjustBalance(email, year, typeId, { entitled, adjustDelta
 export const scheduleId = (email, ymStr) => `${email}_${ymStr}`;
 export const getSchedule = (email, ymStr) => read('schedules', scheduleId(email, ymStr)).catch(() => null);
 export async function setScheduleDay(email, date, value) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const id = scheduleId(email, date.slice(0, 7));
   const r = doc(db, 'schedules', id);
   const snap = await getDoc(r);
@@ -129,6 +131,7 @@ async function overlapping(email, from, to, types) {
 }
 
 export async function submitRequest(input) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const me = session.profile || {};
   const email = session.email;
   const type = input.type;
@@ -214,6 +217,7 @@ export async function submitRequest(input) {
 }
 
 export async function cancelRequest(id) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const r = await read('requests', id);
   if (!r || !String(r.status).startsWith('pending')) throw userError('مينفعش تلغي طلب اتقفل.', 'Only pending requests can be cancelled.');
   await settle(updateDoc(doc(db, 'requests', id), {
@@ -225,6 +229,7 @@ export async function cancelRequest(id) {
 
 // ---------- decide ----------
 export async function decide(id, action, note = '') {
+  window.dispatchEvent(new Event('am:data-changed'));
   const r = await read('requests', id);
   if (!r) throw userError('الطلب مش موجود.', 'Request not found.');
   if (!String(r.status).startsWith('pending')) throw userError('الطلب ده اتقفل بالفعل.', 'This request was already closed.');
@@ -257,6 +262,7 @@ function nextStatusFromStages(r) {
 
 /** Final approval + its effects, atomically where it matters. */
 export async function applyApproval(id, entry) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const r0 = await read('requests', id);
   const email = r0.email;
   const dates = r0.startDate && r0.endDate ? dateRange(r0.startDate, r0.endDate) : [];
@@ -332,6 +338,7 @@ export async function applyApproval(id, entry) {
 
 /** HR: revoke an approved leave/remote/mission (returns balance, clears schedule) */
 export async function revokeRequest(id, note = '') {
+  window.dispatchEvent(new Event('am:data-changed'));
   track('request.revoke', { target: id, detail: note });
   const r0 = await read('requests', id);
   if (!r0 || r0.status !== 'approved') throw userError('الطلب مش معتمد.', 'Request is not approved.');

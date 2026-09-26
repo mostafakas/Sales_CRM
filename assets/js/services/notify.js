@@ -30,11 +30,21 @@ const subs = new Set();
 export const onNotifications = (fn) => { subs.add(fn); fn(items); return () => subs.delete(fn); };
 export const unreadCount = () => items.filter(n => !n.read).length;
 
+// keep the list small (it is read at every sign-in): read notifications older than 30 days are removed
+function prune(rows) {
+  const cutoff = Date.now() - 30 * 86400000;
+  const old = rows.filter(n => n.read && (toMs(n.at) || 0) < cutoff).slice(0, 200);
+  if (!old.length) return;
+  const b = writeBatch(db);
+  old.forEach(n => b.delete(doc(db, 'notifications', n.id)));
+  b.commit().catch(e => console.warn('prune', e && e.message));
+}
 export function startNotifications() {
   let first = true;
   watch(query(col('notifications'), where('to', '==', session.email)), (rows, snap) => {
     const fresh = [];
     if (!first && snap && snap.docChanges) snap.docChanges().forEach(ch => { if (ch.type === 'added') fresh.push(ch.doc.data()); });
+    if (first) prune(rows);
     first = false;
     items = rows.sort((a, b) => (toMs(b.at) || 0) - (toMs(a.at) || 0)).slice(0, 100);
     subs.forEach(f => f(items));

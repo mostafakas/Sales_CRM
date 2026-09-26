@@ -47,6 +47,7 @@ export function staleDay(u, at = now()) {
  * planned end of that day, and the day is flagged so HR can review it.
  */
 export async function closeStaleDay(email, u, by = session.email) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const key = u.dayKey;
   const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
   const plan = planFor(key, sched);
@@ -71,6 +72,7 @@ export async function closeStaleDay(email, u, by = session.email) {
 
 /** Start (or resume) today. mode: 'office' | 'remote' */
 export async function startDay(mode, { remoteApproved = true } = {}) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const email = session.email;
   let u = await read('users', email);
   if (staleDay(u)) { await closeStaleDay(email, u); u = await read('users', email); }
@@ -104,6 +106,7 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
 
 /** Change live status for a user (self, or a manager forcing it). */
 export async function changeStatus(email, newStatus, by = session.email) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const u = await read('users', email);
   if (!u) throw new Error('no user');
   const old = u.status || 'Offline';
@@ -128,6 +131,7 @@ export const endDay = () => changeStatus(session.email, 'Offline');
 
 /** HR/admin: reset a person's live counters (e.g. wrong start). Keeps the archived day. */
 export async function resetLive(email) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const b = writeBatch(db);
   b.update(doc(db, 'users', email), { status: 'Offline', timeBank: zeroBank(), lastChange: serverTimestamp(), lastChangeClient: Date.now(), checkedOut: true });
   await b.commit();
@@ -135,6 +139,7 @@ export async function resetLive(email) {
 
 /** HR: correct a day manually (check-in/out times, mode, totals) with a note. */
 export async function correctDay(email, date, { checkInMs, checkOutMs, mode, workMs, note, status }) {
+  window.dispatchEvent(new Event('am:data-changed'));
   const r = doc(db, 'attendance_days', dayDocId(email, date));
   const cur = (await getDoc(r)).data() || {};
   const u = await read('users', email);

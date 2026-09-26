@@ -3,8 +3,22 @@ import { list, query, col, where, toMs, listF } from '../core/fb.js';
 import { session, now, isHR, seesAll, isFinance } from '../core/session.js';
 import { policy, planFor, lateness, earlyLeave, isWorkingPlan, lateDeductionDays, dayKey, leaveType, trackedSince } from '../core/policy.js';
 import { person } from './directory.js';
-import { monthDates, hmToMin, minutesOfDay } from '../core/utils.js';
+import { monthDates, hmToMin, minutesOfDay, ymd } from '../core/utils.js';
 import { rangeDays, monthDays } from './attendance.js';
+
+// Short-lived cache: moving between pages or tabs doesn't re-read a whole month from Firestore.
+// Cleared whenever attendance, schedules or requests change (event 'am:data-changed').
+const memo = new Map();
+const thisMonth = () => ymd(now()).slice(0, 7);
+function cached(key, ym, fn) {
+  const ttl = ym < thisMonth() ? 30 * 60000 : 2 * 60000;
+  const hit = memo.get(key);
+  if (hit && Date.now() - hit.t < ttl) return hit.p;
+  const pr = fn().catch(e => { memo.delete(key); throw e; });
+  memo.set(key, { t: Date.now(), p: pr });
+  return pr;
+}
+window.addEventListener('am:data-changed', () => memo.clear());
 import { activePeople, allPeople, trackedPeople } from './directory.js';
 
 /** Approved excuse minutes that cover a given check-in / check-out */
@@ -81,11 +95,11 @@ export function summarize(rows) {
 
 /** One person, one month */
 export async function personMonth(email, ym, leaderScope) {
-  const [days, schedules, reqs] = await Promise.all([
+  const [days, schedules, reqs] = await cached(`p|${email}|${ym}|${leaderScope || ''}`, ym, () => Promise.all([
     monthDays(email, ym, leaderScope),
     list(query(col('schedules'), ...(leaderScope ? [where('leaderEmail', '==', leaderScope)] : []), where('email', '==', email), where('month', '==', ym))).catch(() => []),
     list(query(col('requests'), ...(leaderScope ? [where('leaderEmail', '==', leaderScope)] : []), where('email', '==', email))).catch(() => [])
-  ]);
+  ]));
   const schedule = schedules[0] || null;
   const excuses = reqs.filter(r => r.type === 'excuse' && r.status === 'approved');
   const recs = Object.fromEntries(days.map(d => [d.date, d]));
@@ -100,11 +114,11 @@ export async function teamMonth(ym, { people } = {}) {
   const all = seesAll() || isFinance();
   const scope = all ? undefined : session.email;
   const from = `${ym}-01`, to = `${ym}-31`;
-  const [days, schedules, reqs] = await Promise.all([
+  const [days, schedules, reqs] = await cached(`t|${ym}|${scope || ''}`, ym, () => Promise.all([
     rangeDays(from, to, scope),
     list(query(col('schedules'), ...(scope ? [where('leaderEmail', '==', scope)] : []), where('month', '==', ym))).catch(() => []),
     listF('requests', [...(scope ? [['leaderEmail', '==', scope]] : []), ['startDate', '>=', `${ym}-01`]]).catch(() => [])
-  ]);
+  ]));
   const ppl = (people || (all ? activePeople() : activePeople().filter(p => p.leaderEmail === session.email))).filter(p => p.trackAttendance !== false);
   const todayKey = dayKey(now());
   const out = ppl.map(p => {

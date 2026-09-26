@@ -30,6 +30,8 @@ const clone = (v) => dec(enc(v));
 // ---- refs ----
 export function getFirestore() { return { type: 'firestore' }; }
 export const initializeFirestore = getFirestore;
+export const persistentLocalCache = (o) => ({ kind: 'persistent', ...(o || {}) });
+export const persistentMultipleTabManager = () => ({ kind: 'multi-tab' });
 const autoId = () => Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
 export function collection(base, ...segs) {
   const path = [base && base.type === 'doc' ? base.path : null, ...segs].filter(Boolean).join('/');
@@ -120,6 +122,7 @@ function applyDelete(ref) { logWrite('delete', ref, store[ref.path] || {}, null)
 function commit() { persist(); notifyAll(); }
 
 // ---- snapshots ----
+function bill(n) { try { const k = 'mock_reads'; localStorage.setItem(k, String(Number(localStorage.getItem(k) || 0) + n)); } catch {} }
 function docSnap(ref) {
   const d = store[ref.path];
   return { id: ref.id, ref, exists: () => !!d, data: () => (d ? clone(d) : undefined), get: (f) => d ? clone(getPath(d, f)) : undefined };
@@ -179,9 +182,9 @@ function querySnap(q, prevIds) {
   prev.forEach((_, id) => { if (!docs.some(d => d.id === id)) changes.push({ type: 'removed', doc: { id, data: () => ({}) } }); });
   return { docs, size: docs.length, empty: !docs.length, forEach: (f) => docs.forEach(f), docChanges: () => changes };
 }
-export async function getDoc(ref) { await tick(); if (localStorage.getItem('mock_quota') === '1') throw err('resource-exhausted', 'Quota exceeded.'); return docSnap(ref); }
+export async function getDoc(ref) { await tick(); bill(1); if (localStorage.getItem('mock_quota') === '1') throw err('resource-exhausted', 'Quota exceeded.'); return docSnap(ref); }
 export const getDocFromServer = getDoc;
-export async function getDocs(q) { await tick(); return querySnap(q); } // throws like Firestore when an index is missing
+export async function getDocs(q) { await tick(); const r = querySnap(q); bill(Math.max(1, r.docs.length)); return r; } // throws like Firestore when an index is missing
 export async function setDoc(ref, data, opts) { await tick(); applySet(ref, data, opts); commit(); }
 export async function updateDoc(ref, data) { await tick(); applyUpdate(ref, data); commit(); }
 export async function deleteDoc(ref) { await tick(); applyDelete(ref); commit(); }
@@ -194,12 +197,12 @@ function fire(l) {
   try {
     if (l.target.type === 'doc') {
       const s = docSnap(l.target); const j = JSON.stringify(enc(s.data() || null));
-      if (j === l.last) return; l.last = j; l.next(s);
+      if (j === l.last) return; l.last = j; bill(1); l.next(s);
     } else {
       const s = querySnap(l.target, l.prevIds);
       const ids = new Map(s.docs.map(d => [d.id, JSON.stringify(enc(d.data()))]));
       const j = JSON.stringify([...ids.entries()]);
-      if (j === l.last) return; l.last = j; l.prevIds = ids; l.next(s);
+      if (j === l.last) return; l.last = j; l.prevIds = ids; bill(Math.max(l.billed ? 0 : 1, s.docChanges().filter(c => c.type !== 'removed').length)); l.billed = true; l.next(s);
     }
   } catch (e) { l.error && l.error(e); }
 }

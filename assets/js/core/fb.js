@@ -8,7 +8,7 @@ import {
   verifyPasswordResetCode, confirmPasswordReset
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {
-  getFirestore, doc, collection, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, onSnapshot,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, collection, getDoc, getDocs, setDoc, updateDoc, addDoc, deleteDoc, onSnapshot,
   query, where, orderBy, limit, serverTimestamp, increment, arrayUnion, Timestamp, runTransaction, writeBatch, deleteField
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
@@ -23,7 +23,13 @@ export const firebaseConfig = {
 
 const app = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Local persistent cache: reopening the app (or another tab) resumes from the browser's copy, and Firestore
+// only bills the documents that changed since — a big saving on the free daily quota.
+function makeDb() {
+  try { return initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); }
+  catch (e) { console.warn('persistent cache unavailable', e && e.message); return getFirestore(app); }
+}
+export const db = makeDb();
 
 // A second app instance lets HR create accounts without signing themselves out.
 let _secondary = null;
