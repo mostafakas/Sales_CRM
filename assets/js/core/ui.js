@@ -22,6 +22,7 @@ export const toastErr = (e, title) => {
   if (/permission/i.test(code)) msg = L('مش مسموح لك بالعملية دي.', 'You do not have permission for this action.');
   else if (/unavailable|network|offline/i.test(code)) msg = L('مفيش اتصال بالإنترنت.', 'No internet connection.');
   else if (e && e.userMessage) msg = e.userMessage;
+  if (e && e.diag) msg += ` [${e.diag}]`;
   toast(title || L('تعذّر التنفيذ', 'Action failed'), msg, 'bad');
 };
 export function userError(ar, en) { const e = new Error(en || ar); e.userMessage = L(ar, en); return e; }

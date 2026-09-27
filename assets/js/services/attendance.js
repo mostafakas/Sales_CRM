@@ -3,7 +3,7 @@
 import {
   db, doc, col, writeBatch, serverTimestamp, toMs, read, list, query, where, addDoc, getDoc, setDoc, listF
 } from '../core/fb.js';
-import { session, now, isHR, seesAll, isFinance } from '../core/session.js';
+import { session, now, isHR, seesAll, isFinance, syncClock } from '../core/session.js';
 import { policy, dayKey, planFor } from '../core/policy.js';
 import { cairoMs, addDays, L } from '../core/utils.js';
 
@@ -75,33 +75,63 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
   window.dispatchEvent(new Event('am:data-changed'));
   const email = session.email;
   let u = await read('users', email);
-  if (staleDay(u)) { await closeStaleDay(email, u); u = await read('users', email); }
-  const at = now();
-  const key = dayKey(at);
-  const resuming = u.dayKey === key;
-  const b = writeBatch(db);
-  const bank = resuming ? { ...zeroBank(), ...(u.timeBank || {}) } : zeroBank();
-  const upd = {
-    status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: bank,
-    dayKey: key, checkedOut: false, workLocation: resuming ? (u.workLocation || mode) : mode,
-    remotePending: resuming ? !!u.remotePending : (mode === 'remote' && !remoteApproved)
-  };
-  if (!resuming) upd.firstOnlineAt = serverTimestamp();
-  b.update(doc(db, 'users', email), upd);
-  const dayRef = doc(db, 'attendance_days', dayDocId(email, key));
-  if (resuming) {
-    b.set(dayRef, { closed: false, checkOutMs: null, updatedAt: serverTimestamp() }, { merge: true });
-  } else {
-    b.set(dayRef, {
-      email, name: u.name || email, date: key, leaderEmail: u.leaderEmail || '', department: u.department || '',
-      mode, remotePending: mode === 'remote' && !remoteApproved,
-      checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: 0, breakMs: 0, meetingMs: 0,
-      closed: false, closedBy: '', autoClosed: false, corrected: false, updatedAt: serverTimestamp()
-    }, { merge: true });
+  if (staleDay(u)) {
+    // a previous day that can't be closed must not stop the employee from starting today
+    try { await closeStaleDay(email, u); u = await read('users', email); }
+    catch (e) { console.warn('[startDay] previous day not closed', u.dayKey, e && (e.code || e.message)); }
   }
-  b.set(doc(col('logs')), logEntry(u, email, 'Offline', 'Online', 0, email, key));
-  await b.commit();
-  return { resumed: resuming, key };
+  const attempt = async () => {
+    const at = now();
+    const key = dayKey(at);
+    const dayRef = doc(db, 'attendance_days', dayDocId(email, key));
+    // "resume" only when today's record really exists (the profile can say today without one)
+    const resuming = u.dayKey === key && !!(await getDoc(dayRef).then(s => s.exists()).catch(() => false));
+    const b = writeBatch(db);
+    const bank = resuming ? { ...zeroBank(), ...(u.timeBank || {}) } : zeroBank();
+    const upd = {
+      status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: bank,
+      dayKey: key, checkedOut: false, workLocation: resuming ? (u.workLocation || mode) : mode,
+      remotePending: resuming ? !!u.remotePending : (mode === 'remote' && !remoteApproved)
+    };
+    if (!resuming) upd.firstOnlineAt = serverTimestamp();
+    b.update(doc(db, 'users', email), upd);
+    if (resuming) {
+      b.set(dayRef, { closed: false, checkOutMs: null, updatedAt: serverTimestamp() }, { merge: true });
+    } else {
+      b.set(dayRef, {
+        email, name: u.name || email, date: key, leaderEmail: u.leaderEmail || '', department: u.department || '',
+        mode, remotePending: mode === 'remote' && !remoteApproved,
+        checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: 0, breakMs: 0, meetingMs: 0,
+        closed: false, closedBy: '', autoClosed: false, corrected: false, updatedAt: serverTimestamp()
+      }, { merge: true });
+    }
+    b.set(doc(col('logs')), logEntry(u, email, 'Offline', 'Online', 0, email, key));
+    await b.commit();
+    return { resumed: resuming, key };
+  };
+  try { return await attempt(); }
+  catch (e) {
+    if (!/permission/i.test(String(e && e.code))) throw e;
+    // the security rules compare the check-in time with the server clock — re-sync and try once more
+    await syncClock();
+    u = await read('users', email);
+    try { return await attempt(); }
+    catch (e2) { throw withDiag(e2, u); }
+  }
+}
+
+/** Short technical note shown with the error, so a screenshot tells us what was rejected */
+function withDiag(e, u) {
+  const lc = u && u.lastChange;
+  const diag = [
+    `day:${(u && u.dayKey) || '-'}→${dayKey(now())}`, `st:${(u && u.status) || '-'}`, `out:${u && u.checkedOut}`,
+    `lc:${lc == null ? 'none' : (typeof lc.toMillis === 'function' ? 'ts' : typeof lc)}`,
+    `tb:${JSON.stringify((u && u.timeBank) || {}).slice(0, 60)}`, `clk:${Math.round(session.offset / 1000)}s`,
+    `pc:${Math.round((Date.now() - now()) / 60000)}m`
+  ].join(' ');
+  console.error('[startDay] rejected', diag, e);
+  e.diag = diag;
+  return e;
 }
 
 /** Change live status for a user (self, or a manager forcing it). */
