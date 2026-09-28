@@ -1,6 +1,7 @@
 // People directory: a single live listener on users, shared by every screen.
 import { col, watch, query, where, orderBy } from '../core/fb.js';
 import { session, isHR, seesAll } from '../core/session.js';
+import { setPersonLookup } from '../core/policy.js';
 
 let people = [];
 let ready = null;
@@ -26,6 +27,7 @@ export const activePeople = () => people.filter(p => !p.isSuspended);
 /** Active people whose attendance is tracked (executives can be excluded per employee) */
 export const trackedPeople = () => activePeople().filter(p => p.trackAttendance !== false);
 export const person = (email) => people.find(p => p.email === email) || null;
+setPersonLookup(person);
 export const nameOf = (email) => (person(email) || {}).name || (email ? String(email).split('@')[0] : '—');
 /** People the current user manages: everyone for HR/admin, direct reports for leaders */
 export function managedPeople() {

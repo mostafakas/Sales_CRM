@@ -48,7 +48,7 @@ export default async function render(root) {
       const sch = schedules.find(s => s.email === p.email);
       const rec = days.find(d => d.email === p.email);
       const ex = reqs.filter(r => r.email === p.email && r.type === 'excuse' && r.status === 'approved');
-      return { p, r: classifyDay(date, planFor(date, sch), rec, ex, todayKey, trackedSince(p)) };
+      return { p, r: classifyDay(date, planFor(date, sch, p), rec, ex, todayKey, trackedSince(p)) };
     });
     draw();
     const stale = date === todayKey ? activePeople().filter(p => staleDay(p)) : [];

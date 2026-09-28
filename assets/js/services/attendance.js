@@ -52,7 +52,7 @@ export async function closeStaleDay(email, u, by = session.email) {
   window.dispatchEvent(new Event('am:data-changed'));
   const key = u.dayKey;
   const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
-  const plan = planFor(key, sched);
+  const plan = planFor(key, sched, email);
   const endCap = cairoMs(key, plan.end || policy.workEnd);
   const bank = { ...zeroBank(), ...(u.timeBank || {}) };
   const last = toMs(u.lastChange) || endCap;
@@ -129,7 +129,7 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
 /** ms between the planned start and a check-in that falls inside the grace period (0 otherwise) */
 async function graceCredit(email, key, at) {
   const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
-  const plan = planFor(key, sched);
+  const plan = planFor(key, sched, email);
   if (!isWorkingPlan(plan) || !plan.start) return 0;
   const since = at - cairoMs(key, plan.start);
   return since > 0 && since <= (Number(policy.graceMinutes) || 0) * 60000 ? Math.round(since) : 0;

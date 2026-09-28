@@ -76,6 +76,7 @@ export const MODE_META = {
 export const ROLE_META = {
   employee: { ar: 'موظف', en: 'Employee' },
   leader: { ar: 'مدير فريق', en: 'Team leader' },
+  sales_manager: { ar: 'مدير السيلز', en: 'Sales manager' },   // a team leader for the sales team
   pm: { ar: 'مدير المشروعات', en: 'Project manager' },
   hr: { ar: 'موارد بشرية', en: 'HR' },
   finance: { ar: 'المالية', en: 'Finance' },
@@ -127,13 +128,24 @@ export function dayKey(ms) { return ymd(ms - (policy.dayBoundaryHour || 0) * 360
 export const isWeekend = (dateStr) => (policy.weekend || []).includes(weekday(dateStr));
 export const isHoliday = (dateStr) => !!holidays[dateStr];
 
-/** Effective plan for a date: schedule override > holiday > weekend > office */
-export function planFor(dateStr, schedule) {
+// ---------- personal working hours (users/{email}.workStart / workEnd; empty = company hours) ----------
+let personOf = () => null;
+/** The people directory registers how to look a person up by email. */
+export const setPersonLookup = (fn) => { personOf = fn || (() => null); };
+/** { start, end } for a person — `who` is an email or a profile; falls back to the company hours */
+export function hoursFor(who) {
+  const p = who && typeof who === 'object' ? (who.workStart ? who : personOf(who.email)) : personOf(who);
+  return p && p.workStart && p.workEnd ? { start: p.workStart, end: p.workEnd } : { start: policy.workStart, end: policy.workEnd };
+}
+
+/** Effective plan for a date: schedule override > holiday > weekend > office. `who` = email/profile when there may be no schedule. */
+export function planFor(dateStr, schedule, who) {
+  const h = hoursFor(who || (schedule && schedule.email) || '');
   const o = schedule && schedule.days && schedule.days[dateStr];
-  if (o && o.mode) return { mode: o.mode, start: o.start || policy.workStart, end: o.end || policy.workEnd, leaveType: o.leaveType, requestId: o.requestId, source: 'schedule' };
+  if (o && o.mode) return { mode: o.mode, start: o.start || h.start, end: o.end || h.end, leaveType: o.leaveType, requestId: o.requestId, source: 'schedule' };
   if (isHoliday(dateStr)) return { mode: 'holiday', name: holidays[dateStr], start: null, end: null, source: 'holiday' };
   if (isWeekend(dateStr)) return { mode: 'off', start: null, end: null, source: 'weekend' };
-  return { mode: 'office', start: policy.workStart, end: policy.workEnd, source: 'default' };
+  return { mode: 'office', start: h.start, end: h.end, source: 'default' };
 }
 export const isWorkingPlan = (p) => p.mode === 'office' || p.mode === 'remote' || p.mode === 'mission';
 

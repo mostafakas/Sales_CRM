@@ -9,7 +9,7 @@ import { getBalance, adjustBalance, remaining, emptyBalance, balanceId } from '.
 import { personMonthView } from './attendance.js';
 import { publicConfig, toLogin, callService } from '../services/authsvc.js';
 import { renameAccount, renameStepText } from '../services/rename.js';
-import { forceLogout } from '../core/session.js';
+import { forceLogout, LEADER_ROLES } from '../core/session.js';
 import { balanceTable } from './profile.js';
 import { requestCard, showRequestDetails } from './request-card.js';
 
@@ -107,6 +107,10 @@ export async function openEditor(email) {
           <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role" ${!isNew && email === session.email && !isAdmin() ? 'disabled' : ''}>${Object.keys(ROLE_META).filter(r => isAdmin() || r === normRole(u.role) || !['admin', 'finance', 'pm'].includes(r)).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('المدير المباشر', 'Direct manager')}</label><select class="select" name="leaderEmail"><option value="">${L('بدون (يروح لـ HR)', 'None (goes to HR)')}</option>${people.map(p => `<option value="${esc(p.email)}" ${u.leaderEmail === p.email ? 'selected' : ''}>${esc(p.name || p.email)} — ${esc(roleLabel(p.role))}</option>`).join('')}</select></div>
           <div class="row between span-2"><div><b>${L('يسجّل حضور وانصراف', 'Tracks attendance')}</b><div class="xs muted">${L('اقفلها للإدارة العليا أو اللي مش مطلوب منهم تسجيل — مش هيتحسب عليهم غياب ولا هيظهروا في تقارير الحضور.', 'Turn off for executives or anyone not required to clock in — no absence, not in attendance reports.')}</div></div><label class="switch"><input type="checkbox" name="trackAttendance" ${u.trackAttendance !== false ? 'checked' : ''}><span></span></label></div>
+          <div class="field"><label>${L('ميعاد الحضور', 'Starts work at')}</label><input class="input" type="time" name="workStart" value="${esc(u.workStart || '')}">
+            <div class="xs muted mt-4">${L(`فاضي = ميعاد الشركة (${policy.workStart})`, `Empty = company hours (${policy.workStart})`)}</div></div>
+          <div class="field"><label>${L('ميعاد الانصراف', 'Ends work at')}</label><input class="input" type="time" name="workEnd" value="${esc(u.workEnd || '')}">
+            <div class="xs muted mt-4">${L(`فاضي = ميعاد الشركة (${policy.workEnd})`, `Empty = company hours (${policy.workEnd})`)}</div></div>
           <div class="field span-2" id="team-box"></div>
         </div>
         <div data-pane="leave" class="col gap-16 hidden">
@@ -182,11 +186,16 @@ export async function openEditor(email) {
   paySum();
   const teamBox = m.$('#team-box');
   const drawTeam = () => {
-    if (f.role.value !== 'leader' || isNew) { teamBox.innerHTML = ''; return; }
+    if (!LEADER_ROLES.includes(f.role.value) || isNew) { teamBox.innerHTML = ''; return; }
     const cands = allPeople().filter(p => !p.isSuspended && p.email !== email);
-    teamBox.innerHTML = `<label>${L('أعضاء الفريق', 'Team members')}</label><div class="grid g-2" style="gap:6px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">${cands.map(p => `<label class="check"><input type="checkbox" data-member="${esc(p.email)}" ${p.leaderEmail === email ? 'checked' : ''}> ${esc(p.name || p.email)}</label>`).join('')}</div>`;
+    const dept = f.department.value.trim();
+    teamBox.innerHTML = `<div class="row between"><label>${L('أعضاء الفريق', 'Team members')}</label>
+        ${dept ? `<button type="button" class="btn btn-sm btn-soft" id="team-dept"><i class="fas fa-users"></i> ${L(`كل قسم «${esc(dept)}»`, `All of "${esc(dept)}"`)}</button>` : ''}</div>
+      <div class="grid g-2" style="gap:6px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">${cands.map(p => `<label class="check"><input type="checkbox" data-member="${esc(p.email)}" data-dept="${esc(p.department || '')}" ${p.leaderEmail === email ? 'checked' : ''}> ${esc(p.name || p.email)}${p.department ? ` <span class="xs muted">· ${esc(p.department)}</span>` : ''}</label>`).join('')}</div>`;
+    const td = teamBox.querySelector('#team-dept');
+    if (td) td.onclick = () => teamBox.querySelectorAll('[data-member]').forEach(cb => { if (cb.dataset.dept === dept) cb.checked = true; });
   };
-  f.role.onchange = drawTeam; drawTeam();
+  f.role.onchange = drawTeam; f.department.onchange = drawTeam; drawTeam();
   // live balance: changing the entitlement moves "remaining" by the same amount
   m.$$('tr[data-lt] [data-ent]').forEach(inp => {
     let prev = Number(inp.value || 0);
@@ -259,9 +268,12 @@ export async function openEditor(email) {
     });
     if (!selfLocked && !isNew && balEdits.length && !val('balNote')) { m.$$('#et .tab').find(x => x.dataset.p === 'leave').click(); f.balNote.focus(); return fail(L('اكتب سبب تعديل الرصيد.', 'Enter a reason for the balance change.')); }
     if (val('leaderEmail') === newEmail) { err.textContent = L('الموظف مينفعش يكون مدير نفسه.', 'An employee cannot manage themselves.'); err.classList.remove('hidden'); return; }
+    if (!!val('workStart') !== !!val('workEnd')) { m.$$('#et .tab').find(x => x.dataset.p === 'job').click(); return fail(L('حدد ميعاد الحضور والانصراف الاتنين، أو سيبهم فاضيين لمواعيد الشركة.', 'Set both start and end times, or leave both empty for company hours.')); }
+    if (val('workStart') && val('workEnd') <= val('workStart')) { m.$$('#et .tab').find(x => x.dataset.p === 'job').click(); return fail(L('ميعاد الانصراف لازم يكون بعد ميعاد الحضور في نفس اليوم.', 'The end time must be after the start time on the same day.')); }
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
       gender: f.gender.value, hireDate: val('hireDate'), remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
+      workStart: val('workStart'), workEnd: val('workEnd'),
       permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: isAdmin() ? f.payroll.checked : !!(u.permissions && u.permissions.payroll) }, updatedAt: serverTimestamp()
     };
     // a non-admin cannot change their own role, access or suspension (the rules reject it)
@@ -316,7 +328,7 @@ export async function openEditor(email) {
         b.update(doc(db, 'users', email), pub);
         // own salary/bank data is changed by another HR member or an admin, never by yourself
         if (email !== session.email || isAdmin()) b.set(doc(db, 'employees_private', email), privData, { merge: true });
-        if (f.role.value === 'leader') {
+        if (LEADER_ROLES.includes(f.role.value)) {
           m.$$('[data-member]').forEach(cb => {
             const pe = person(cb.dataset.member); if (!pe) return;
             if (cb.checked && pe.leaderEmail !== email) b.update(doc(db, 'users', pe.email), { leaderEmail: email });

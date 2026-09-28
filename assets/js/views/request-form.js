@@ -1,7 +1,7 @@
 // New-request dialog shared by "My day" and "My requests".
 import { L, esc, ymd, addDays, imageToDataUrl, addMonths } from '../core/utils.js';
 import { modal, toast, toastErr, busy } from '../core/ui.js';
-import { REQUEST_TYPES, leaveTypes, policy, typeLabel } from '../core/policy.js';
+import { REQUEST_TYPES, leaveTypes, policy, typeLabel, hoursFor } from '../core/policy.js';
 import { session, now } from '../core/session.js';
 import { submitRequest, getBalance, remaining, countWorkingDays } from '../services/requests.js';
 import { play } from '../core/sounds.js';
@@ -73,7 +73,7 @@ export function openRequestForm(type = 'leave', preset = {}) {
       h += `<div class="form-grid">
         <div class="field"><label>${L('النوع', 'Kind')}</label><select class="select" name="excuseKind"><option value="late">${L('إذن تأخير', 'Late arrival')}</option><option value="early">${L('انصراف مبكر', 'Early leave')}</option><option value="middle">${L('خروج أثناء اليوم', 'Mid-day exit')}</option></select></div>
         <div class="field"><label>${L('اليوم', 'Day')}</label><input class="input" type="date" name="date" value="${preset.date || today}"></div>
-        <div class="field"><label>${L('من الساعة', 'From')}</label><input class="input" type="time" name="fromTime" value="${policy.workStart}"></div>
+        <div class="field"><label>${L('من الساعة', 'From')}</label><input class="input" type="time" name="fromTime" value="${hoursFor(session.email).start}"></div>
         <div class="field"><label>${L('إلى الساعة', 'To')}</label><input class="input" type="time" name="toTime" value=""></div></div>`;
     } else if (t === 'correction') {
       h += `<div class="form-grid">

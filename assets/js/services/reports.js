@@ -105,7 +105,7 @@ export async function personMonth(email, ym, leaderScope) {
   const recs = Object.fromEntries(days.map(d => [d.date, d]));
   const todayKey = dayKey(now());
   const since = trackedSince(person(email));
-  const rows = monthDates(ym).map(d => classifyDay(d, planFor(d, schedule), recs[d], excuses, todayKey, since));
+  const rows = monthDates(ym).map(d => classifyDay(d, planFor(d, schedule, email), recs[d], excuses, todayKey, since));
   return { rows, totals: summarize(rows), schedule, requests: reqs };
 }
 
@@ -126,7 +126,7 @@ export async function teamMonth(ym, { people } = {}) {
     const recs = Object.fromEntries(days.filter(d => d.email === p.email).map(d => [d.date, d]));
     const excuses = reqs.filter(r => r.email === p.email && r.type === 'excuse' && r.status === 'approved');
     const since = trackedSince(p);
-    const rows = monthDates(ym).map(d => classifyDay(d, planFor(d, sch), recs[d], excuses, todayKey, since));
+    const rows = monthDates(ym).map(d => classifyDay(d, planFor(d, sch, p), recs[d], excuses, todayKey, since));
     const myReqs = reqs.filter(r => r.email === p.email && (r.startDate || '').slice(0, 7) === ym);
     return { person: p, rows, totals: summarize(rows), requests: myReqs };
   });

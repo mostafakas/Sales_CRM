@@ -299,7 +299,7 @@ export async function applyApproval(id, entry) {
         const snap = schedSnaps[m];
         const days = { ...((snap.exists() && snap.data().days) || {}) };
         dates.filter(d => d.slice(0, 7) === m).forEach(d => {
-          const p = planFor(d, { days });
+          const p = planFor(d, { days }, email);
           if (p.mode === 'off' || p.mode === 'holiday') return;
           days[d] = { mode, requestId: id, ...(r.leaveType ? { leaveType: r.leaveType } : {}), ...(p.start ? { start: p.start, end: p.end } : {}) };
         });

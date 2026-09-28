@@ -66,7 +66,7 @@ export default async function render(root) {
   const info = (u) => {
     const t = today();
     const isToday = u.dayKey === t;
-    const plan = planFor(t, schedules[u.email] || null);
+    const plan = planFor(t, schedules[u.email] || null, u);
     const on = isToday && u.status && u.status !== 'Offline';
     const fo = isToday ? toMs(u.firstOnlineAt) : null;
     let state;
@@ -228,7 +228,7 @@ export default async function render(root) {
       const bank = liveBank(u);
       bank.Total = bankTotal(bank);
       root.querySelectorAll(`[data-live^="${CSS.escape(u.email)}|"]`).forEach(el => { el.textContent = fmtDur(bank[el.dataset.live.split('|')[1]]); });
-      const w = segWidths(bank, planMs(planFor(t, schedules[u.email] || null)));
+      const w = segWidths(bank, planMs(planFor(t, schedules[u.email] || null, u)));
       SEGS.forEach((k, n) => { const s = root.querySelector(`[data-seg="${CSS.escape(u.email)}|${k}"]`); if (s) s.style.width = w[n] + '%'; });
     });
   }
@@ -248,7 +248,7 @@ export default async function render(root) {
       const u = managedPeople().find(p => p.email === email); if (!u) return;
       const d = u.dayKey || today();
       const b = liveBank(u);
-      const row = classifyDay(d, planFor(d, schedules[email] || null), { checkInMs: toMs(u.firstOnlineAt), mode: u.workLocation, workMs: b.Online, breakMs: b.Break, meetingMs: b.Meeting }, [], today());
+      const row = classifyDay(d, planFor(d, schedules[email] || null, email), { checkInMs: toMs(u.firstOnlineAt), mode: u.workLocation, workMs: b.Online, breakMs: b.Break, meetingMs: b.Meeting }, [], today());
       showDayDetails(email, row);
     },
     manage: ({ email }) => {

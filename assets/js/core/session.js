@@ -46,7 +46,8 @@ export const isFinance = () => session.role === 'finance' || isAdmin() || !!perm
 export const isPM = () => session.role === 'pm';
 /** sees every employee's attendance, requests, leave and reports (read) */
 export const seesAll = () => isHR() || isPM();
-export const isLeader = () => session.role === 'leader' || session.team.length > 0;
+export const LEADER_ROLES = ['leader', 'sales_manager'];
+export const isLeader = () => LEADER_ROLES.includes(session.role) || session.team.length > 0;
 export const canApprove = () => isLeader() || isHR() || isFinance();
 export const hasCRM = () => !!perms().crm || isAdmin();
 export const canSeeTeamOf = (email) => isHR() || session.team.includes(normEmail(email));

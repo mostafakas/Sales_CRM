@@ -37,9 +37,9 @@ export default async function render(root) {
     root.querySelector('#tb').innerHTML = ppl.length ? ppl.map(p => `<tr><td style="text-align:start"><div class="person">${avatar(p, 'sm')}<div><b>${esc(p.name)}</b><span>${esc(p.title || '')}</span></div></div></td>
       ${dates.map(d => {
         const sch = schedules.find(s => s.email === p.email && s.month === d.slice(0, 7));
-        const pl = planFor(d, sch);
+        const pl = planFor(d, sch, p);
         const meta = MODE_META[pl.mode] || MODE_META.office;
-        const custom = pl.source === 'schedule' && pl.start && (pl.start !== policy.workStart || pl.end !== policy.workEnd);
+        const custom = pl.start && (pl.start !== policy.workStart || pl.end !== policy.workEnd); // personal or per-day hours
         return `<td><div class="cell ${meta.cls}" data-email="${esc(p.email)}" data-date="${d}" role="button" tabindex="0" title="${esc(pl.name || '')}">
           <div>${esc(pl.mode === 'leave' && pl.leaveType ? leaveTypeLabel(pl.leaveType) : modeLabel(pl.mode))}</div>${custom ? `<div class="xs num">${esc(pl.start)}–${esc(pl.end)}</div>` : ''}</div></td>`;
       }).join('')}</tr>`).join('') : `<tr><td colspan="8">${empty('fa-users', L('مفيش موظفين', 'No employees'))}</td></tr>`;
@@ -48,7 +48,7 @@ export default async function render(root) {
   function edit(email, date) {
     const p = managedPeople().find(x => x.email === email);
     const sch = schedules.find(s => s.email === email && s.month === date.slice(0, 7));
-    const pl = planFor(date, sch);
+    const pl = planFor(date, sch, email);
     if (pl.mode === 'leave' || (pl.requestId && pl.source === 'schedule')) {
       toast(L('اليوم ده جاي من طلب معتمد', 'This day comes from an approved request'), L('لو عايز تغيّره، ألغِ اعتماد الطلب من صفحة الموافقات.', 'To change it, revoke the request in Approvals.'), 'info');
       return;
@@ -65,7 +65,7 @@ export default async function render(root) {
     const f = m.$('#sf');
     m.$('#ok').onclick = (e) => busy(e.currentTarget, async () => {
       const val = { mode: f.mode.value, ...(f.mode.value !== 'off' ? { start: f.start.value, end: f.end.value } : {}), by: session.email };
-      const dates = f.all.checked ? Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter(d => { const x = planFor(d, schedules.find(s => s.email === email && s.month === d.slice(0, 7))); return x.mode !== 'off' && x.mode !== 'holiday' && x.mode !== 'leave' && !x.requestId; }) : [date];
+      const dates = f.all.checked ? Array.from({ length: 7 }, (_, i) => addDays(start, i)).filter(d => { const x = planFor(d, schedules.find(s => s.email === email && s.month === d.slice(0, 7)), email); return x.mode !== 'off' && x.mode !== 'holiday' && x.mode !== 'leave' && !x.requestId; }) : [date];
       try { for (const d of dates) await setScheduleDay(email, d, val); m.close(); toast(L('تم الحفظ', 'Saved')); load(); } catch (ex) { toastErr(ex); }
     });
     const r = m.$('#rst'); if (r) r.onclick = () => busy(r, async () => { try { await setScheduleDay(email, date, null); m.close(); load(); } catch (ex) { toastErr(ex); } });

@@ -38,7 +38,7 @@ export default async function render(root) {
     const p = u();
     const st = started() ? p.status : 'Offline';
     const meta = STATUS_META[st] || STATUS_META.Offline;
-    const plan = planFor(today(), schedule);
+    const plan = planFor(today(), schedule, session.email);
     const h = zparts(now()).h;
     const greet = h < 12 ? L('صباح الخير', 'Good morning') : (h < 17 ? L('مساء الخير', 'Good afternoon') : L('مساء النور', 'Good evening'));
     const fo = p.dayKey === today() ? toMs(p.firstOnlineAt) : null;
@@ -69,7 +69,7 @@ export default async function render(root) {
   function renderPad() {
     const p = u();
     const card = root.querySelector('#pad-card');
-    const plan = planFor(today(), schedule);
+    const plan = planFor(today(), schedule, session.email);
     if (!started()) {
       const stale = staleDay(p);
       const note = plan.mode === 'leave' ? `<div class="alert warn mb-16"><i class="fas fa-umbrella-beach"></i><span>${L('النهارده إجازة معتمدة ليك', 'You have approved leave today')}${plan.leaveType ? ` (${esc(leaveTypeLabel(plan.leaveType))})` : ''}.</span></div>`
@@ -109,7 +109,7 @@ export default async function render(root) {
   }
 
   async function openStart() {
-    const plan = planFor(today(), schedule);
+    const plan = planFor(today(), schedule, session.email);
     const approvedRemote = plan.mode === 'remote';
     const quota = Number(u().remoteQuota ?? policy.defaultRemoteQuota);
     const m = modal({
