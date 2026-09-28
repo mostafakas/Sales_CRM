@@ -551,6 +551,7 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .mon-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; border-top: 3px solid var(--st, var(--border)); }
 .mon-card.idle { background: color-mix(in srgb, var(--surface) 70%, var(--surface-2)); }
 .mon-card .person { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.mon-card .person > .min0 { flex: 1; }
 .mon-card .person b { display: block; font-size: 13.5px; }
 .mon-card .person span { font-size: 11.5px; color: var(--muted); display: block; }
 .mon-card .mon-sub { flex-direction: row; gap: 12px; }

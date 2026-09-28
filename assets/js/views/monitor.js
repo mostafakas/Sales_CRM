@@ -177,7 +177,7 @@ export default async function render(root) {
     return `<div class="mon-cards">${rows.map(u => {
       const i = infos.get(u.email);
       return `<article class="card mon-card ${i.on ? '' : 'idle'}" style="--st:${STATES[i.state].color}">
-        <div class="row gap-8">${who(u, i)}<span class="grow"></span>${actions(u)}</div>
+        <div class="row gap-8">${who(u, i)}${actions(u)}</div>
         <div class="row between gap-8 mon-card-status"><div class="mon-status">${statusCell(u, i)}</div>${where_(u, i)}</div>
         ${i.fo ? progress(u, i) : ''}
         <div class="row between xs muted">
