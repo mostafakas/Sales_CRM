@@ -54,12 +54,16 @@ service cloud.firestore {
       return request.time > t0 - duration.value(4, 'h') && request.time < t0 + duration.value(32, 'h');
     }
     function workSum(d) { return d.get('workMs', 0) + d.get('breakMs', 0) + d.get('meetingMs', 0); }
+    // grace period (settings → work hours); a check-in inside it is credited as work from the start of the shift
+    function graceMs() { return (exists(settingsPath()) ? get(settingsPath()).data.get('graceMinutes', 15) : 15) * 60000 + 120000; }
     function tbSum(m) { return m.get('Online', 0) + m.get('Break', 0) + m.get('Meeting', 0); }
     function timeBankOk() {
       return !('timeBank' in affected())
         || ('lastChange' in affected() && (
-             // a new work day starts from zero
-             (request.resource.data.get('dayKey', '') != resource.data.get('dayKey', '') && tbSum(request.resource.data.timeBank) == 0)
+             // a new work day starts from zero (+ the grace-period credit, as work only)
+             (request.resource.data.get('dayKey', '') != resource.data.get('dayKey', '')
+                 && request.resource.data.timeBank.get('Break', 0) == 0 && request.resource.data.timeBank.get('Meeting', 0) == 0
+                 && request.resource.data.timeBank.get('Online', 0) >= 0 && request.resource.data.timeBank.get('Online', 0) <= graceMs())
              // legacy docs without a server timestamp
              || !(resource.data.get('lastChange', null) is timestamp)
              // same day: counters can grow at most by the real elapsed time (+2 min tolerance)
@@ -93,6 +97,15 @@ service cloud.firestore {
       // A leader may clear the "remote pending" flag for a team member
       allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending'])
         && request.resource.data.remotePending == false;
+
+      // A leader may switch a team member's live status (break / meeting / working / end of day).
+      // Same limits as self-service: server clock, and counters grow at most by the real elapsed time.
+      allow update: if active() && email != me() && resource.data.get('leaderEmail', '') == me()
+        && resource.data.get('isSuspended', false) != true
+        && onlyChanged(['status', 'lastChange', 'lastChangeClient', 'timeBank', 'checkedOut'])
+        && request.resource.data.status in ['Online', 'Break', 'Meeting', 'Offline']
+        && request.resource.data.lastChange == request.time
+        && timeBankOk();
 
       // Self-service: live attendance fields only, with server-verified clock and bounded time
       allow update: if signedIn() && email == me()
@@ -139,8 +152,9 @@ service cloud.firestore {
     match /attendance_days/{id} {
       function selfKeys() {
         return ['email', 'name', 'date', 'leaderEmail', 'department', 'mode', 'remotePending', 'checkIn', 'checkInMs', 'checkOutMs',
-                'workMs', 'breakMs', 'meetingMs', 'closed', 'closedBy', 'autoClosed', 'corrected', 'updatedAt'];
+                'workMs', 'breakMs', 'meetingMs', 'closed', 'closedBy', 'autoClosed', 'corrected', 'updatedAt', 'creditMs'];
       }
+      function creditOk(d) { return d.get('creditMs', 0) is number && d.get('creditMs', 0) >= 0 && d.get('creditMs', 0) <= graceMs(); }
       function checkOutOk(d) {
         return d.get('checkOutMs', null) == null
           || (d.checkOutMs <= nowMs() + 300000 && (d.get('autoClosed', false) == true || d.checkOutMs >= nowMs() - 300000));
@@ -153,6 +167,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(selfKeys())
         && request.resource.data.get('corrected', false) == false
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
+        && creditOk(request.resource.data)
         && (!('checkIn' in request.resource.data) || (request.resource.data.checkIn == request.time && dayWindowOk(request.resource.data.date)))
         && (!('checkInMs' in request.resource.data) || near(request.resource.data.checkInMs))
         && checkOutOk(request.resource.data);
@@ -161,22 +176,36 @@ service cloud.firestore {
         && onlyChanged(['workMs', 'breakMs', 'meetingMs', 'checkOutMs', 'closed', 'closedBy', 'autoClosed', 'updatedAt', 'remotePending'])
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
         && (!('remotePending' in affected()) || request.resource.data.remotePending == true)
-        && workSum(request.resource.data) <= nowMs() - resource.data.get('checkInMs', 0) + 300000
+        && workSum(request.resource.data) <= nowMs() - resource.data.get('checkInMs', 0) + resource.data.get('creditMs', 0) + 300000
         && checkOutOk(request.resource.data);
       // self first check-in on a day doc that exists without one (pre-created by HR or migration)
       allow update: if active() && resource.data.email == me() && request.resource.data.email == me()
         && resource.data.get('checkIn', null) == null && resource.data.get('corrected', false) == false
         && onlyChanged(selfKeys())
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
+        && creditOk(request.resource.data)
         && (!('checkIn' in affected()) || (request.resource.data.checkIn == request.time && dayWindowOk(request.resource.data.date)))
         && (!('checkInMs' in affected()) || near(request.resource.data.checkInMs))
         && checkOutOk(request.resource.data);
       // leader clears "remote pending" after approving
       allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending', 'updatedAt']) && request.resource.data.remotePending == false;
+      // leader updates a team member's day when switching their status or ending / auto-closing it
+      allow update: if active() && resource.data.email != me() && leads(resource.data.email)
+        && request.resource.data.email == resource.data.email
+        && onlyChanged(['workMs', 'breakMs', 'meetingMs', 'checkOutMs', 'closed', 'closedBy', 'autoClosed', 'updatedAt'])
+        && request.resource.data.get('closedBy', '') in ['', 'leader']
+        && workSum(request.resource.data) <= nowMs() - resource.data.get('checkInMs', 0) + resource.data.get('creditMs', 0) + 300000
+        && checkOutOk(request.resource.data);
+      // leader closes a forgotten day of a team member that has no record yet (no check-in, flagged auto-closed)
+      allow create: if active() && request.resource.data.email != me() && leads(request.resource.data.email)
+        && id == request.resource.data.email + '_' + request.resource.data.date
+        && request.resource.data.keys().hasOnly(['email', 'date', 'workMs', 'breakMs', 'meetingMs', 'checkOutMs', 'closed', 'closedBy', 'autoClosed', 'updatedAt'])
+        && request.resource.data.closedBy == 'leader' && request.resource.data.autoClosed == true
+        && checkOutOk(request.resource.data);
     }
     match /logs/{id} {
       allow read: if active() && (resource.data.user == me() || seesAll() || resource.data.get('leaderEmail', '') == me());
-      allow create: if active() && (request.resource.data.user == me() || isHR()) && request.resource.data.timestamp == request.time;
+      allow create: if active() && (request.resource.data.user == me() || isHR() || leads(request.resource.data.user)) && request.resource.data.timestamp == request.time;
       // only re-pointed when an admin changes someone's username
       allow update: if isAdmin() && onlyChanged(['user', 'leaderEmail']);
       allow delete: if isAdmin();

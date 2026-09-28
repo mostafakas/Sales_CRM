@@ -542,6 +542,8 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .mon-work { min-width: 160px; display: flex; flex-direction: column; gap: 6px; }
 .mon-work b { font-size: 13.5px; }
 .mon-work .progress { height: 6px; }
+.progress.stack { display: flex; }
+.progress.stack > span { flex: none; border-radius: 0; transition: width .6s linear; }
 .mon-sub { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .mon-sub > span { display: inline-flex; gap: 6px; align-items: center; }
 .mon-sub i { width: 13px; font-size: 11px; color: var(--faint); }

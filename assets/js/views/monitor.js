@@ -21,6 +21,10 @@ const STATES = {
 const ORDER = Object.keys(STATES);
 const FROM_STATUS = { Online: 'working', Break: 'break', Meeting: 'meeting' };
 const VIEW_KEY = 'am_monitor_view';
+const SEGS = ['Online', 'Meeting', 'Break'];
+const bankTotal = (b) => (b.Online || 0) + (b.Break || 0) + (b.Meeting || 0);
+/** width % of each status in the day bar; past the planned hours the bar is full and keeps the proportions */
+const segWidths = (b, target) => { const d = Math.max(target || 1, bankTotal(b)); return SEGS.map(k => ((b[k] || 0) / d * 100).toFixed(2)); };
 const planMs = (p) => (p && p.start && p.end ? Math.max(0, hmToMin(p.end) - hmToMin(p.start)) * 60000 : 8 * 3600000);
 
 export default async function render(root) {
@@ -47,6 +51,8 @@ export default async function render(root) {
     <div id="board"></div>`;
 
   const today = () => dayKey(now());
+  // HR manages everyone; a leader manages the people who report directly to them
+  const canManage = (u) => isHR() || (u.leaderEmail === session.email && u.email !== session.email);
 
   async function loadSchedules() {
     const ym = today().slice(0, 7);
@@ -145,14 +151,18 @@ export default async function render(root) {
     if (!(i.on || i.state === 'ended')) return '<span class="faint">—</span>';
     return `<span class="loc ${i.remote ? 'remote' : ''}"><i class="fas ${i.remote ? 'fa-house-laptop' : 'fa-building'}"></i>${esc(modeLabel(u.workLocation || 'office'))}</span>`;
   };
+  // the day bar: working / meeting / break side by side, each in its own colour, against the planned hours
   const progress = (u, i) => {
-    const pct = Math.min(100, Math.round((i.bank.Online / (i.target || 1)) * 100));
-    return `<div class="mon-work"><div class="row between"><b class="num" data-live="${esc(u.email)}|Online">${fmtDur(i.bank.Online)}</b><small class="faint num">${esc(fmtHours(i.target))}</small></div>
-      <div class="progress ${pct >= 100 ? 'ok' : ''}"><span data-prog="${esc(u.email)}" style="width:${pct}%"></span></div></div>`;
+    const w = segWidths(i.bank, i.target);
+    return `<div class="mon-work"><div class="row between"><b class="num" data-live="${esc(u.email)}|Total" title="${L('إجمالي اليوم', 'Total today')}">${fmtDur(bankTotal(i.bank))}</b><small class="faint num">${esc(fmtHours(i.target))}</small></div>
+      <div class="progress stack">${SEGS.map((k, n) => `<span data-seg="${esc(u.email)}|${k}" style="width:${w[n]}%;background:${STATUS_META[k].color}" title="${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}"></span>`).join('')}</div></div>`;
   };
+  const subTimes = (u, i) => `<span title="${L('شغل', 'Working')}"><i class="fas fa-laptop-code" style="color:var(--ok)"></i><span data-live="${esc(u.email)}|Online">${fmtDur(i.bank.Online)}</span></span>`
+    + `<span title="${L('استراحة', 'Break')}"><i class="fas fa-mug-hot" style="color:var(--warn)"></i><span data-live="${esc(u.email)}|Break">${fmtDur(i.bank.Break)}</span></span>`
+    + `<span title="${L('اجتماع', 'Meeting')}"><i class="fas fa-users" style="color:var(--info)"></i><span data-live="${esc(u.email)}|Meeting">${fmtDur(i.bank.Meeting)}</span></span>`;
   const actions = (u) => `<div class="row gap-4 mon-actions">
       <button class="btn btn-sm btn-ghost btn-icon" data-action="history" data-email="${esc(u.email)}" title="${L('سجل النهارده', "Today's log")}" aria-label="${L('سجل النهارده', "Today's log")}"><i class="fas fa-clock-rotate-left"></i></button>
-      ${isHR() ? `<button class="btn btn-sm btn-ghost btn-icon" data-action="manage" data-email="${esc(u.email)}" title="${L('إدارة', 'Manage')}" aria-label="${L('إدارة', 'Manage')}"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
+      ${canManage(u) ? `<button class="btn btn-sm btn-ghost btn-icon" data-action="manage" data-email="${esc(u.email)}" title="${L('إدارة', 'Manage')}" aria-label="${L('إدارة', 'Manage')}"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
     </div>`;
   const who = (u, i) => `<div class="person"><span class="avatar-wrap">${avatar(u, 'sm')}<span class="status-dot" style="background:${STATES[i.state].color}"></span></span>
       <div class="min0"><b class="truncate">${esc(u.name || u.email)}</b><span class="truncate">${esc(u.title || roleLabel(u.role))}${u.department && seesAll() ? ` · ${esc(u.department)}` : ''}</span></div></div>`;
@@ -160,7 +170,7 @@ export default async function render(root) {
   function tableHTML(rows, infos) {
     return `<div class="card"><div class="table-wrap"><table class="table mon-table"><thead><tr>
         <th>${L('الموظف', 'Employee')}</th><th>${L('الحالة', 'Status')}</th><th>${L('المكان', 'Location')}</th><th>${L('الحضور', 'Check-in')}</th>
-        <th style="min-width:180px">${L('وقت الشغل النهارده', 'Worked today')}</th><th>${L('استراحة / اجتماع', 'Break / meeting')}</th><th></th>
+        <th style="min-width:180px">${L('إجمالي اليوم', 'Total today')}</th><th>${L('شغل / استراحة / اجتماع', 'Work / break / meeting')}</th><th></th>
       </tr></thead><tbody>${rows.map(u => {
         const i = infos.get(u.email);
         return `<tr class="${i.on ? '' : 'idle'}" data-email="${esc(u.email)}">
@@ -169,7 +179,7 @@ export default async function render(root) {
           <td>${where_(u, i)}</td>
           <td class="num">${i.fo ? esc(fmtTime(i.fo)) : '<span class="faint">—</span>'}</td>
           <td>${i.fo ? progress(u, i) : '<span class="faint">—</span>'}</td>
-          <td>${i.fo ? `<div class="num mon-sub"><span title="${L('استراحة', 'Break')}"><i class="fas fa-mug-hot"></i><span data-live="${esc(u.email)}|Break">${fmtDur(i.bank.Break)}</span></span><span title="${L('اجتماع', 'Meeting')}"><i class="fas fa-users"></i><span data-live="${esc(u.email)}|Meeting">${fmtDur(i.bank.Meeting)}</span></span></div>` : '<span class="faint">—</span>'}</td>
+          <td>${i.fo ? `<div class="num mon-sub">${subTimes(u, i)}</div>` : '<span class="faint">—</span>'}</td>
           <td style="text-align:end">${actions(u)}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   }
@@ -182,7 +192,7 @@ export default async function render(root) {
         ${i.fo ? progress(u, i) : ''}
         <div class="row between xs muted">
           <span>${i.fo ? `<i class="fas fa-right-to-bracket"></i> <span class="num">${esc(fmtTime(i.fo))}</span>` : L('لسه ما سجّلش حضور', 'Not checked in yet')}</span>
-          ${i.fo ? `<span class="num mon-sub"><span><i class="fas fa-mug-hot"></i><span data-live="${esc(u.email)}|Break">${fmtDur(i.bank.Break)}</span></span><span><i class="fas fa-users"></i><span data-live="${esc(u.email)}|Meeting">${fmtDur(i.bank.Meeting)}</span></span></span>` : ''}
+          ${i.fo ? `<span class="num mon-sub">${subTimes(u, i)}</span>` : ''}
         </div>
         ${flags(i) ? `<div class="row-wrap gap-4">${flags(i)}</div>` : ''}
       </article>`;
@@ -216,9 +226,10 @@ export default async function render(root) {
     managedPeople().forEach(u => {
       if (u.dayKey !== t || !u.status || u.status === 'Offline') return;
       const bank = liveBank(u);
+      bank.Total = bankTotal(bank);
       root.querySelectorAll(`[data-live^="${CSS.escape(u.email)}|"]`).forEach(el => { el.textContent = fmtDur(bank[el.dataset.live.split('|')[1]]); });
-      const bar = root.querySelector(`[data-prog="${CSS.escape(u.email)}"]`);
-      if (bar) bar.style.width = Math.min(100, Math.round((bank.Online / planMs(planFor(t, schedules[u.email] || null))) * 100)) + '%';
+      const w = segWidths(bank, planMs(planFor(t, schedules[u.email] || null)));
+      SEGS.forEach((k, n) => { const s = root.querySelector(`[data-seg="${CSS.escape(u.email)}|${k}"]`); if (s) s.style.width = w[n] + '%'; });
     });
   }
 
@@ -241,25 +252,29 @@ export default async function render(root) {
       showDayDetails(email, row);
     },
     manage: ({ email }) => {
-      const u = managedPeople().find(p => p.email === email); if (!u) return;
+      const u = managedPeople().find(p => p.email === email); if (!u || !canManage(u)) return;
       const i = info(u);
+      const hr = isHR();
       const cur = i.on ? u.status : 'Offline';
+      // a leader switches the status of a day that already started today (starting a day is the employee's own action)
+      const startedToday = u.dayKey === today() && !!i.fo;
       const m = modal({
         title: u.name || email, icon: 'fa-user-gear', size: 'narrow',
         body: `<div class="col gap-8">
           <div class="label">${L('تغيير الحالة يدوياً', 'Force status')}</div>
-          <div class="grid g-2" style="gap:8px">${[...COUNTED, 'Offline'].map(k => `<button class="btn btn-sm" data-force="${k}" ${cur === k ? 'disabled' : ''}><i class="fas ${STATUS_META[k].icon}"></i> ${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}</button>`).join('')}</div>
+          ${!hr && !startedToday ? `<p class="xs muted">${L('الموظف لسه ما بدأش يومه النهارده — تقدر تغيّر حالته بعد ما يبدأ.', 'This employee has not started today yet — you can change their status once they do.')}</p>` : ''}
+          <div class="grid g-2" style="gap:8px">${[...COUNTED, 'Offline'].map(k => `<button class="btn btn-sm" data-force="${k}" ${cur === k || (!hr && !startedToday) ? 'disabled' : ''}><i class="fas ${STATUS_META[k].icon}"></i> ${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}</button>`).join('')}</div>
           <div class="divider"></div>
           ${i.stale ? `<button class="btn btn-sm" data-do="close"><i class="fas fa-flag-checkered"></i> ${L(`قفل يوم ${i.stale} على ميعاد الانصراف`, `Close ${i.stale} at planned end time`)}</button>` : ''}
-          <button class="btn btn-sm" data-do="reset"><i class="fas fa-rotate-left"></i> ${L('تصفير العدادات الحالية', 'Reset live counters')}</button>
-          <a class="btn btn-sm" href="#/employees/${encodeURIComponent(email)}"><i class="fas fa-id-card"></i> ${L('ملف الموظف', 'Employee file')}</a>
+          ${hr ? `<button class="btn btn-sm" data-do="reset"><i class="fas fa-rotate-left"></i> ${L('تصفير العدادات الحالية', 'Reset live counters')}</button>
+          <a class="btn btn-sm" href="#/employees/${encodeURIComponent(email)}"><i class="fas fa-id-card"></i> ${L('ملف الموظف', 'Employee file')}</a>` : ''}
         </div>`
       });
       m.$$('[data-force]').forEach(b => b.onclick = async () => {
         try { await changeStatus(email, b.dataset.force); toast(L('تم تغيير الحالة', 'Status changed')); m.close(); } catch (e) { toastErr(e); }
       });
       const c = m.$('[data-do="close"]'); if (c) c.onclick = async () => { try { await closeStaleDay(email, u); toast(L('تم قفل اليوم', 'Day closed')); m.close(); } catch (e) { toastErr(e); } };
-      m.$('[data-do="reset"]').onclick = async () => {
+      const rs = m.$('[data-do="reset"]'); if (rs) rs.onclick = async () => {
         const ok = await confirmDialog({ title: L('تصفير العدادات', 'Reset counters'), message: L('العدادات الحالية هترجع صفر والحالة «غير متصل». سجل اليوم المحفوظ مش هيتمسح.', 'Live counters go to zero and status to Offline. The archived day is kept.'), okClass: 'btn-danger' });
         if (!ok) return;
         try { await resetLive(email); toast(L('تم التصفير', 'Reset done')); m.close(); } catch (e) { toastErr(e); }

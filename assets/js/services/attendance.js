@@ -4,12 +4,14 @@ import {
   db, doc, col, writeBatch, serverTimestamp, toMs, read, list, query, where, addDoc, getDoc, setDoc, listF
 } from '../core/fb.js';
 import { session, now, isHR, seesAll, isFinance, syncClock } from '../core/session.js';
-import { policy, dayKey, planFor } from '../core/policy.js';
+import { policy, dayKey, planFor, isWorkingPlan } from '../core/policy.js';
 import { cairoMs, addDays, L } from '../core/utils.js';
 
 export const COUNTED = ['Online', 'Break', 'Meeting'];
 export const dayDocId = (email, date) => `${email}_${date}`;
 const zeroBank = () => ({ Online: 0, Break: 0, Meeting: 0 });
+/** who closed someone else's day: HR, or the employee's direct leader */
+const closerRole = () => (isHR() ? 'hr' : 'leader');
 
 export function liveBank(u, at = now()) {
   const bank = { ...zeroBank(), ...(u && u.timeBank || {}) };
@@ -64,7 +66,7 @@ export async function closeStaleDay(email, u, by = session.email) {
   b.update(doc(db, 'users', email), { status: 'Offline', timeBank: bank, lastChange: serverTimestamp(), lastChangeClient: Date.now(), checkedOut: true });
   b.set(doc(db, 'attendance_days', dayDocId(email, key)), {
     email, date: key, workMs: bank.Online, breakMs: bank.Break, meetingMs: bank.Meeting,
-    checkOutMs: checkOut, closed: true, closedBy: by === email ? 'auto' : 'hr', autoClosed: true, updatedAt: serverTimestamp()
+    checkOutMs: checkOut, closed: true, closedBy: by === email ? 'auto' : closerRole(), autoClosed: true, updatedAt: serverTimestamp()
   }, { merge: true });
   b.set(doc(col('logs')), logEntry(u, email, u.status, 'Offline', add, by, key));
   await b.commit();
@@ -88,6 +90,9 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     const resuming = u.dayKey === key && !!(await getDoc(dayRef).then(s => s.exists()).catch(() => false));
     const b = writeBatch(db);
     const bank = resuming ? { ...zeroBank(), ...(u.timeBank || {}) } : zeroBank();
+    // checking in within the grace period: not late, and the minutes since the start of the shift count as work
+    const credit = resuming ? 0 : await graceCredit(email, key, at);
+    bank.Online += credit;
     const upd = {
       status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: bank,
       dayKey: key, checkedOut: false, workLocation: resuming ? (u.workLocation || mode) : mode,
@@ -96,12 +101,13 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     if (!resuming) upd.firstOnlineAt = serverTimestamp();
     b.update(doc(db, 'users', email), upd);
     if (resuming) {
-      b.set(dayRef, { closed: false, checkOutMs: null, updatedAt: serverTimestamp() }, { merge: true });
+      // closedBy goes back to '' — a day ended by HR/the leader must stay resumable by its owner
+      b.set(dayRef, { closed: false, closedBy: '', checkOutMs: null, updatedAt: serverTimestamp() }, { merge: true });
     } else {
       b.set(dayRef, {
         email, name: u.name || email, date: key, leaderEmail: u.leaderEmail || '', department: u.department || '',
         mode, remotePending: mode === 'remote' && !remoteApproved,
-        checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: 0, breakMs: 0, meetingMs: 0,
+        checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: credit, creditMs: credit, breakMs: 0, meetingMs: 0,
         closed: false, closedBy: '', autoClosed: false, corrected: false, updatedAt: serverTimestamp()
       }, { merge: true });
     }
@@ -118,6 +124,15 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     try { return await attempt(); }
     catch (e2) { throw withDiag(e2, u); }
   }
+}
+
+/** ms between the planned start and a check-in that falls inside the grace period (0 otherwise) */
+async function graceCredit(email, key, at) {
+  const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
+  const plan = planFor(key, sched);
+  if (!isWorkingPlan(plan) || !plan.start) return 0;
+  const since = at - cairoMs(key, plan.start);
+  return since > 0 && since <= (Number(policy.graceMinutes) || 0) * 60000 ? Math.round(since) : 0;
 }
 
 /** Short technical note shown with the error, so a screenshot tells us what was rejected */
@@ -152,7 +167,7 @@ export async function changeStatus(email, newStatus, by = session.email) {
   if (newStatus === 'Offline') upd.checkedOut = true;
   b.update(doc(db, 'users', email), upd);
   const dayUpd = { workMs: bank.Online, breakMs: bank.Break, meetingMs: bank.Meeting, updatedAt: serverTimestamp() };
-  if (newStatus === 'Offline') Object.assign(dayUpd, { checkOutMs: at, closed: true, closedBy: by === email ? 'user' : 'hr' });
+  if (newStatus === 'Offline') Object.assign(dayUpd, { checkOutMs: at, closed: true, closedBy: by === email ? 'user' : closerRole() });
   b.set(doc(db, 'attendance_days', dayDocId(email, key)), dayUpd, { merge: true });
   b.set(doc(col('logs')), logEntry(u, email, old, newStatus, dur, by, key));
   await b.commit();
