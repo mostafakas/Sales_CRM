@@ -132,7 +132,8 @@ async function graceCredit(email, key, at) {
   const plan = planFor(key, sched, email);
   if (!isWorkingPlan(plan) || !plan.start) return 0;
   const since = at - cairoMs(key, plan.start);
-  return since > 0 && since <= (Number(policy.graceMinutes) || 0) * 60000 ? Math.round(since) : 0;
+  const grace = plan.grace !== undefined ? plan.grace : (Number(policy.graceMinutes) || 0);
+  return since > 0 && since <= grace * 60000 ? Math.round(since) : 0;
 }
 
 /** Short technical note shown with the error, so a screenshot tells us what was rejected */

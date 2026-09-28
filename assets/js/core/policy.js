@@ -132,20 +132,22 @@ export const isHoliday = (dateStr) => !!holidays[dateStr];
 let personOf = () => null;
 /** The people directory registers how to look a person up by email. */
 export const setPersonLookup = (fn) => { personOf = fn || (() => null); };
-/** { start, end } for a person — `who` is an email or a profile; falls back to the company hours */
+/** { start, end, grace } for a person — `who` is an email or a profile; each falls back to the company setting */
 export function hoursFor(who) {
-  const p = who && typeof who === 'object' ? (who.workStart ? who : personOf(who.email)) : personOf(who);
-  return p && p.workStart && p.workEnd ? { start: p.workStart, end: p.workEnd } : { start: policy.workStart, end: policy.workEnd };
+  const p = who && typeof who === 'object' ? (personOf(who.email) || who) : personOf(who);
+  const own = p && p.workStart && p.workEnd;
+  const g = p && p.graceMinutes !== undefined && p.graceMinutes !== null && p.graceMinutes !== '' ? Number(p.graceMinutes) : Number(policy.graceMinutes) || 0;
+  return { start: own ? p.workStart : policy.workStart, end: own ? p.workEnd : policy.workEnd, grace: g };
 }
 
 /** Effective plan for a date: schedule override > holiday > weekend > office. `who` = email/profile when there may be no schedule. */
 export function planFor(dateStr, schedule, who) {
   const h = hoursFor(who || (schedule && schedule.email) || '');
   const o = schedule && schedule.days && schedule.days[dateStr];
-  if (o && o.mode) return { mode: o.mode, start: o.start || h.start, end: o.end || h.end, leaveType: o.leaveType, requestId: o.requestId, source: 'schedule' };
+  if (o && o.mode) return { mode: o.mode, start: o.start || h.start, end: o.end || h.end, grace: h.grace, leaveType: o.leaveType, requestId: o.requestId, source: 'schedule' };
   if (isHoliday(dateStr)) return { mode: 'holiday', name: holidays[dateStr], start: null, end: null, source: 'holiday' };
   if (isWeekend(dateStr)) return { mode: 'off', start: null, end: null, source: 'weekend' };
-  return { mode: 'office', start: h.start, end: h.end, source: 'default' };
+  return { mode: 'office', start: h.start, end: h.end, grace: h.grace, source: 'default' };
 }
 export const isWorkingPlan = (p) => p.mode === 'office' || p.mode === 'remote' || p.mode === 'mission';
 
@@ -163,7 +165,8 @@ export function lateness(checkInMs, plan) {
   if (plan && !isWorkingPlan(plan)) return { late: 0, raw: 0 };
   const start = hmToMin((plan && plan.start) || policy.workStart);
   const rawMin = Math.max(0, Math.round(minutesOfDay(checkInMs) - start));
-  return { late: rawMin > (policy.graceMinutes || 0) ? rawMin : 0, raw: rawMin };
+  const grace = plan && plan.grace !== undefined ? plan.grace : (policy.graceMinutes || 0);
+  return { late: rawMin > grace ? rawMin : 0, raw: rawMin };
 }
 export function earlyLeave(checkOutMs, plan, dateStr) {
   if (!checkOutMs) return 0;

@@ -84,6 +84,7 @@ export async function openEditor(email) {
     body: `<div class="tabs mb-16" id="et">
         <button class="tab active" data-p="basic">${L('البيانات الأساسية', 'Basic info')}</button>
         <button class="tab" data-p="job">${L('الوظيفة والفريق', 'Job & team')}</button>
+        <button class="tab" data-p="hours">${L('مواعيد العمل', 'Work hours')}</button>
         <button class="tab" data-p="leave">${L('الإجازات والأونلاين', 'Leave & remote')}</button>
         <button class="tab" data-p="pay">${L('الراتب والبنك', 'Salary & bank')}</button>
         <button class="tab" data-p="access">${L('الصلاحيات', 'Access')}</button></div>
@@ -107,11 +108,16 @@ export async function openEditor(email) {
           <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role" ${!isNew && email === session.email && !isAdmin() ? 'disabled' : ''}>${Object.keys(ROLE_META).filter(r => isAdmin() || r === normRole(u.role) || !['admin', 'finance', 'pm'].includes(r)).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('المدير المباشر', 'Direct manager')}</label><select class="select" name="leaderEmail"><option value="">${L('بدون (يروح لـ HR)', 'None (goes to HR)')}</option>${people.map(p => `<option value="${esc(p.email)}" ${u.leaderEmail === p.email ? 'selected' : ''}>${esc(p.name || p.email)} — ${esc(roleLabel(p.role))}</option>`).join('')}</select></div>
           <div class="row between span-2"><div><b>${L('يسجّل حضور وانصراف', 'Tracks attendance')}</b><div class="xs muted">${L('اقفلها للإدارة العليا أو اللي مش مطلوب منهم تسجيل — مش هيتحسب عليهم غياب ولا هيظهروا في تقارير الحضور.', 'Turn off for executives or anyone not required to clock in — no absence, not in attendance reports.')}</div></div><label class="switch"><input type="checkbox" name="trackAttendance" ${u.trackAttendance !== false ? 'checked' : ''}><span></span></label></div>
+          <div class="field span-2" id="team-box"></div>
+        </div>
+        <div data-pane="hours" class="form-grid hidden">
           <div class="field"><label>${L('ميعاد الحضور', 'Starts work at')}</label><input class="input" type="time" name="workStart" value="${esc(u.workStart || '')}">
             <div class="xs muted mt-4">${L(`فاضي = ميعاد الشركة (${policy.workStart})`, `Empty = company hours (${policy.workStart})`)}</div></div>
           <div class="field"><label>${L('ميعاد الانصراف', 'Ends work at')}</label><input class="input" type="time" name="workEnd" value="${esc(u.workEnd || '')}">
             <div class="xs muted mt-4">${L(`فاضي = ميعاد الشركة (${policy.workEnd})`, `Empty = company hours (${policy.workEnd})`)}</div></div>
-          <div class="field span-2" id="team-box"></div>
+          <div class="field"><label>${L('دقائق السماح', 'Grace minutes')}</label><input class="input num" type="number" min="0" max="120" name="graceMinutes" value="${esc(u.graceMinutes ?? '')}" placeholder="${esc(policy.graceMinutes)}">
+            <div class="xs muted mt-4">${L(`فاضي = سماح الشركة (${policy.graceMinutes} دقيقة)`, `Empty = company grace (${policy.graceMinutes} min)`)}</div></div>
+          <div class="span-2 alert info"><i class="fas fa-circle-info"></i><div>${L('لو الموظف سجّل حضور خلال دقائق السماح بعد ميعاده، مش بيتحسب عليه تأخير، والدقائق دي بتتضاف لوقت شغله ويكمّل عليها. لو سجّل بعدها بيتحسب تأخير من ميعاد الحضور.', 'Checking in within the grace minutes after the start time is not late, and those minutes are added to work time. After that, lateness counts from the start time.')}</div></div>
         </div>
         <div data-pane="leave" class="col gap-16 hidden">
           <div class="form-grid">
@@ -268,12 +274,13 @@ export async function openEditor(email) {
     });
     if (!selfLocked && !isNew && balEdits.length && !val('balNote')) { m.$$('#et .tab').find(x => x.dataset.p === 'leave').click(); f.balNote.focus(); return fail(L('اكتب سبب تعديل الرصيد.', 'Enter a reason for the balance change.')); }
     if (val('leaderEmail') === newEmail) { err.textContent = L('الموظف مينفعش يكون مدير نفسه.', 'An employee cannot manage themselves.'); err.classList.remove('hidden'); return; }
-    if (!!val('workStart') !== !!val('workEnd')) { m.$$('#et .tab').find(x => x.dataset.p === 'job').click(); return fail(L('حدد ميعاد الحضور والانصراف الاتنين، أو سيبهم فاضيين لمواعيد الشركة.', 'Set both start and end times, or leave both empty for company hours.')); }
-    if (val('workStart') && val('workEnd') <= val('workStart')) { m.$$('#et .tab').find(x => x.dataset.p === 'job').click(); return fail(L('ميعاد الانصراف لازم يكون بعد ميعاد الحضور في نفس اليوم.', 'The end time must be after the start time on the same day.')); }
+    if (!!val('workStart') !== !!val('workEnd')) { m.$$('#et .tab').find(x => x.dataset.p === 'hours').click(); return fail(L('حدد ميعاد الحضور والانصراف الاتنين، أو سيبهم فاضيين لمواعيد الشركة.', 'Set both start and end times, or leave both empty for company hours.')); }
+    if (val('workStart') && val('workEnd') <= val('workStart')) { m.$$('#et .tab').find(x => x.dataset.p === 'hours').click(); return fail(L('ميعاد الانصراف لازم يكون بعد ميعاد الحضور في نفس اليوم.', 'The end time must be after the start time on the same day.')); }
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
       gender: f.gender.value, hireDate: val('hireDate'), remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
       workStart: val('workStart'), workEnd: val('workEnd'),
+      graceMinutes: val('graceMinutes') === '' ? null : Math.max(0, Math.min(120, Number(val('graceMinutes')) || 0)),
       permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: isAdmin() ? f.payroll.checked : !!(u.permissions && u.permissions.payroll) }, updatedAt: serverTimestamp()
     };
     // a non-admin cannot change their own role, access or suspension (the rules reject it)

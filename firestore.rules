@@ -54,8 +54,12 @@ service cloud.firestore {
       return request.time > t0 - duration.value(4, 'h') && request.time < t0 + duration.value(32, 'h');
     }
     function workSum(d) { return d.get('workMs', 0) + d.get('breakMs', 0) + d.get('meetingMs', 0); }
-    // grace period (settings → work hours); a check-in inside it is credited as work from the start of the shift
-    function graceMs() { return (exists(settingsPath()) ? get(settingsPath()).data.get('graceMinutes', 15) : 15) * 60000 + 120000; }
+    // grace period (the employee's own, else settings → work hours); a check-in inside it is credited as work
+    // from the start of the shift. Only used for the signed-in employee's own check-in.
+    function graceMs() {
+      let own = prof().get('graceMinutes', null);
+      return (own is number ? own : (exists(settingsPath()) ? get(settingsPath()).data.get('graceMinutes', 15) : 15)) * 60000 + 120000;
+    }
     function tbSum(m) { return m.get('Online', 0) + m.get('Break', 0) + m.get('Meeting', 0); }
     function timeBankOk() {
       return !('timeBank' in affected())
