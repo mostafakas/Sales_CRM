@@ -134,7 +134,10 @@ service cloud.firestore {
     match /employees_private/{email} {
       allow get: if active() && email == me();
       allow read: if isHR() || isFinance();
-      allow write: if (isHR() || isFinance()) && (email != me() || isAdmin());
+      // salary structure and deduction rules: HR / admin only (never your own unless admin)
+      allow write: if isHR() && (email != me() || isAdmin());
+      // finance keeps just the freelancer "agreed amount" (Treasury → Freelancers)
+      allow update: if isFinance() && email != me() && onlyChanged(['flCredit']);
       // employees may set their own recovery email (used for "Forgot password?")
       allow create: if active() && email == me() && request.resource.data.keys().hasOnly(['email', 'contactEmail', 'updatedAt'])
         && request.resource.data.email == me() && recoveryOk(request.resource.data);

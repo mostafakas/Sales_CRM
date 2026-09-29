@@ -1,9 +1,10 @@
 // My attendance — monthly calendar, totals and day details. `personMonthView` is reused by HR.
-import { L, esc, fmtTime, fmtHours, fmtMin, num, ym as ymOf, addMonths, fmtMonth, weekday, fmtDay, isAr } from '../core/utils.js';
+import { L, esc, fmtTime, fmtHours, fmtMin, num, ym as ymOf, addMonths, fmtMonth, weekday, fmtDay, isAr, money } from '../core/utils.js';
 import { modal, empty, loader, STATUS_META } from '../core/ui.js';
 import { session, now } from '../core/session.js';
 import { modeLabel, leaveTypeLabel, dayKey } from '../core/policy.js';
-import { toMs } from '../core/fb.js';
+import { toMs, read } from '../core/fb.js';
+import { salaryParts, rulesOf, violationsFrom, priceViolations, violationText } from '../services/salary.js';
 import { personMonth, STATUS_DAY } from '../services/reports.js';
 import { dayLogs, scopeFor } from '../services/attendance.js';
 import { openRequestForm } from './request-form.js';
@@ -82,7 +83,7 @@ export async function showDayDetails(email, row, { canRequest = false } = {}) {
 }
 
 /** Render a person's month into `el` with a month switcher */
-export async function personMonthView(el, email, { initialYm, canRequest = false, title = '' } = {}) {
+export async function personMonthView(el, email, { initialYm, canRequest = false, title = '', onData } = {}) {
   let ym = initialYm || ymOf(now());
   let data = null;
   el.innerHTML = `<div class="row between mb-16" style="flex-wrap:wrap;gap:10px">
@@ -105,6 +106,7 @@ export async function personMonthView(el, email, { initialYm, canRequest = false
         const open = () => { const r = data.rows.find(x => x.date === d.dataset.day); if (r && r.status !== 'future') showDayDetails(email, r, { canRequest }); };
         d.onclick = open; d.onkeydown = (e) => { if (e.key === 'Enter') open(); };
       });
+      onData && onData(data, ym);
     } catch (e) {
       console.error(e);
       el.querySelector('#pm-body').innerHTML = `<div class="card">${empty('fa-triangle-exclamation', L('تعذّر تحميل البيانات', 'Could not load data'), e.message)}</div>`;
@@ -115,6 +117,19 @@ export async function personMonthView(el, email, { initialYm, canRequest = false
 }
 
 export default async function render(root) {
-  root.innerHTML = `<div class="page-head"><div><h2>${L('حضوري', 'My attendance')}</h2><p>${L('اضغط على أي يوم عشان تشوف تفاصيله أو تطلب تصحيح.', 'Click any day for details or to request a correction.')}</p></div></div><div id="pm"></div>`;
-  await personMonthView(root.querySelector('#pm'), session.email, { canRequest: true });
+  root.innerHTML = `<div class="page-head"><div><h2>${L('حضوري', 'My attendance')}</h2><p>${L('اضغط على أي يوم عشان تشوف تفاصيله أو تطلب تصحيح.', 'Click any day for details or to request a correction.')}</p></div></div><div id="pm"></div><div id="ded" class="mt-16"></div>`;
+  const priv = await read('employees_private', session.email).catch(() => null);
+  // the month's deductions so far, from this employee's own rules — so a wrong one can be fixed before payroll
+  const drawDeductions = (data, ym) => {
+    const box = root.querySelector('#ded');
+    const parts = salaryParts(priv || {});
+    if (!priv || !parts.structured) { box.innerHTML = ''; return; }
+    const priced = priceViolations(violationsFrom(data.rows, data.requests), parts, rulesOf(priv));
+    const total = priced.lines.reduce((s, l) => s + l.total, 0);
+    box.innerHTML = `<div class="card"><div class="card-head"><h3>${L(`خصومات ${fmtMonth(ym)} لحد دلوقتي`, `${fmtMonth(ym)} deductions so far`)}</h3><b class="num" style="color:${total ? 'var(--bad)' : 'var(--ok)'}">${esc(money(total))}</b></div>
+      ${priced.lines.length ? `<div class="table-wrap"><table class="table"><tbody>${priced.lines.map(l => `<tr><td class="num nowrap">${esc(fmtDay(l.date))}</td><td>${esc(violationText(l))}</td><td class="num" style="color:var(--bad);white-space:nowrap">−${esc(money(l.total, false))}</td></tr>`).join('')}</tbody></table></div>
+        <div class="card-foot" style="justify-content:flex-start"><span class="xs muted"><i class="fas fa-circle-info"></i> ${L('لو فيه خصم غلط، اضغط على اليوم في التقويم واطلب تصحيح أو قدّم إذن — المخالفة بتتشال لما الطلب يتعتمد.', 'If a deduction is wrong, click that day in the calendar and request a correction or a permission — it is removed once approved.')}</span></div>`
+        : `<div class="card-body">${empty('fa-face-smile', L('مفيش خصومات الشهر ده 👏', 'No deductions this month 👏'))}</div>`}</div>`;
+  };
+  await personMonthView(root.querySelector('#pm'), session.email, { canRequest: true, onData: drawDeductions });
 }

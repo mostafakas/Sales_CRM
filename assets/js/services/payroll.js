@@ -10,6 +10,7 @@ import { activePeople, person } from './directory.js';
 import { teamMonth } from './reports.js';
 import { notify } from './notify.js';
 import { track } from './activity.js';
+import { salaryParts, rulesOf, violationsFrom, priceViolations } from './salary.js';
 
 export const itemId = (month, email) => `${month}_${email}`;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -35,39 +36,51 @@ export function allowedMoves(i) {
 }
 
 // ---------- calculation ----------
-export function computeItem({ person: p, priv, totals, advances, manual = {} }) {
-  const sal = (priv && priv.salary) || {};
-  const basic = Number(sal.basic) || 0;
-  const allowances = (sal.allowances || []).reduce((s, a) => s + (Number(a.amount) || 0), 0);
-  const fixed = Number(sal.fixedDeductions) || 0;
-  const dayRate = basic / (Number(policy.payrollDayDivisor) || 30);
-  const absenceDays = totals ? totals.absent * (Number(policy.absenceDeductDays) || 0) : 0;
-  const unpaidDays = totals ? totals.unpaidLeave : 0;
-  const lateDays = totals && policy.lateDeductionEnabled ? totals.lateDeductDays : 0;
+/**
+ * One salary. `violations` are the month's raw attendance violations (services/salary.violationsFrom), priced
+ * with the employee's own rules. `manual` carries bonus / incentive / other deductions / note and this month's
+ * KPI ({ kpiMode: 'pct'|'amt', kpiValue }; empty = the full KPI).
+ */
+export function computeItem({ person: p, priv, totals, violations = [], advances, manual = {} }) {
+  const parts = salaryParts(priv);
+  const rules = rulesOf(priv);
+  const divisor = Number(policy.payrollDayDivisor) || 30;
+  const priced = priceViolations(violations, parts, rules, divisor);
+  // KPI of the month: admin-set % or amount, otherwise paid in full
+  const kpiMode = manual.kpiMode === 'pct' || manual.kpiMode === 'amt' ? manual.kpiMode : '';
+  const kpiValue = kpiMode ? Number(manual.kpiValue) || 0 : null;
+  const kpi = r2(kpiMode === 'pct' ? parts.kpi * kpiValue / 100 : (kpiMode === 'amt' ? kpiValue : parts.kpi));
+  // unpaid leave: the day's basic, from what is left of the basic after absences
+  const unpaidDays = totals ? totals.unpaidLeave || 0 : 0;
+  const unpaid = r2(Math.min(unpaidDays * parts.basic / divisor, priced.left.basic));
   const advance = advances.reduce((s, a) => s + a.installment, 0);
   const other = (manual.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const bonus = Number(manual.bonus) || 0, incentive = Number(manual.incentive) || 0;
-  const lines = {
-    absence: r2(absenceDays * dayRate), unpaid: r2(unpaidDays * dayRate), late: r2(lateDays * dayRate)
-  };
-  const gross = r2(basic + allowances + bonus + incentive);
-  const deductions = r2(fixed + lines.absence + lines.unpaid + lines.late + advance + other);
+  const fixed = parts.fixed;
+  const violationTotal = r2(priced.byPart.basic + priced.byPart.allowances + priced.byPart.regularity);
+  const gross = r2(parts.basic + parts.allowances + parts.regularity + kpi + bonus + incentive);
+  const deductions = r2(fixed + violationTotal + unpaid + advance + other);
   const bank = String((priv && priv.bank) || '').replace(/\s/g, '');
   const payTo = (priv && priv.instapay) ? 'InstaPay' : (bank ? `${L('حساب بنكي', 'Bank account')} •••${bank.slice(-4)}` : '');
   return {
     email: p.email, name: p.name || p.email, title: p.title || '', department: p.department || '', hireDate: p.hireDate || '', payTo,
-    basic, allowances: r2(allowances), allowanceLines: sal.allowances || [], bonus, incentive, fixed,
-    absenceDays, unpaidDays, lateDays: r2(lateDays), lateMinutes: totals ? totals.lateMinutes : 0, presentDays: totals ? totals.present : 0,
-    absenceDeduction: lines.absence, unpaidDeduction: lines.unpaid, lateDeduction: lines.late,
+    structured: parts.structured, totalSalary: parts.total,
+    basic: parts.basic, allowances: parts.allowances, regularity: parts.regularity, kpiFull: parts.kpi, kpi, kpiMode, kpiValue,
+    allowanceLines: [], bonus, incentive, fixed,
+    violations: priced.lines, deductionByPart: priced.byPart,
+    lateDeduction: priced.byKind.late, absenceDeduction: priced.byKind.absence, remoteDeduction: priced.byKind.remote, earlyDeduction: priced.byKind.early,
+    absenceDays: violations.filter(v => v.kind === 'absence').length, unpaidDays, unpaidDeduction: unpaid,
+    lateDays: violations.filter(v => v.kind === 'late').length, lateMinutes: totals ? totals.lateMinutes : 0, presentDays: totals ? totals.present : 0,
     advance: r2(advance),
     // enough about each advance to explain the installment on the payslip ("installment 2 of 5 — 6,000 left")
     advanceRefs: advances.map(a => ({ id: a.id, amount: a.installment, total: Number(a.amount) || 0, paidBefore: Number(a.paid) || 0, count: Number(a.installments) || 0 })),
     otherDeductions: manual.otherDeductions || [], note: manual.note || '',
-    gross, deductions, net: r2(gross - deductions), dayRate: r2(dayRate),
+    gross, deductions, net: r2(gross - deductions), dayRate: r2(parts.basic / divisor),
     att: totals ? {
-      absent: totals.absent || 0, unpaidLeave: totals.unpaidLeave || 0, lateDeductDays: totals.lateDeductDays || 0, lateMinutes: totals.lateMinutes || 0,
+      absent: totals.absent || 0, unpaidLeave: totals.unpaidLeave || 0, lateMinutes: totals.lateMinutes || 0,
       lateDays: totals.lateDays || 0, present: totals.present || 0, office: totals.office || 0, remote: totals.remote || 0, leave: totals.leave || 0,
-      planned: totals.planned || 0, workMs: totals.workMs || 0
+      planned: totals.planned || 0, workMs: totals.workMs || 0,
+      violations // raw, so a later edit (bonus, KPI…) re-prices them with the current salary and rules
     } : null
   };
 }
@@ -97,8 +110,9 @@ export async function buildRun(month) {
     if (priv.contract === 'freelancer') continue;
     const old = existing.find(x => x.email === p.email) || {};
     if (old.status && payStatus(old) !== 'pending') continue; // approved / transferred / sent are frozen
-    const totals = (att.people.find(x => x.person.email === p.email) || {}).totals;
-    const item = computeItem({ person: p, priv, totals, advances: advs.filter(a => a.email === p.email), manual: old });
+    const pm = att.people.find(x => x.person.email === p.email) || {};
+    const violations = pm.rows ? violationsFrom(pm.rows, pm.requests) : [];
+    const item = computeItem({ person: p, priv, totals: pm.totals, violations, advances: advs.filter(a => a.email === p.email), manual: old });
     b.set(doc(db, 'payroll_items', itemId(month, p.email)), { ...item, month, status: 'pending', published: false, updatedAt: serverTimestamp() });
     count++;
   }
@@ -115,7 +129,7 @@ export async function saveManual(month, email, manual) {
   const priv = await read('employees_private', email).catch(() => ({})) || {};
   const totals = it.att || null; // attendance numbers captured when the run was built
   const advances = (it.advanceRefs || []).map(a => ({ id: a.id, installment: a.amount, amount: a.total, paid: a.paidBefore, installments: a.count }));
-  const next = computeItem({ person: p, priv, totals, advances, manual });
+  const next = computeItem({ person: p, priv, totals, violations: (it.att && it.att.violations) || [], advances, manual });
   await updateDoc(doc(db, 'payroll_items', itemId(month, email)), { ...next, updatedAt: serverTimestamp(), editedBy: session.email });
 }
 

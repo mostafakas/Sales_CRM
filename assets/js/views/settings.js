@@ -111,26 +111,15 @@ export default async function render(root) {
       });
     },
     pay() {
-      let tiers = (policy.lateTiers || []).map(t => ({ ...t }));
-      const draw = () => {
-        pane.innerHTML = `<div class="card"><form class="card-body form-grid" id="f">
-          ${sw('lateDeductionEnabled', L('خصم التأخير تلقائياً في الرواتب', 'Deduct lateness automatically in payroll'), policy.lateDeductionEnabled, L('لو مقفولة، التأخير بيظهر في التقارير بس والخصم يدوي.', 'If off, lateness shows in reports only; deductions are manual.'))}
-          <div class="field span-2"><label>${L('شرائح خصم التأخير (لكل يوم متأخر)', 'Lateness tiers (per late day)')}</label>
-            <div class="col gap-8" id="tiers">${tiers.map((t, i) => `<div class="row gap-8" data-i="${i}"><span class="small">${L('أكتر من', 'More than')}</span><input class="input num" type="number" min="0" data-k="after" value="${esc(t.after)}" style="width:100px"><span class="small">${L('دقيقة = خصم', 'min = deduct')}</span><input class="input num" type="number" min="0" step="0.05" data-k="day" value="${esc(t.day)}" style="width:100px"><span class="small">${L('يوم', 'day')}</span><button type="button" class="btn btn-ghost btn-icon btn-sm" data-rm="${i}"><i class="fas fa-trash"></i></button></div>`).join('')}</div>
-            <button type="button" class="btn btn-sm btn-soft mt-8" id="addt" style="align-self:flex-start"><i class="fas fa-plus"></i> ${L('شريحة', 'Tier')}</button></div>
-          ${numField('absenceDeductDays', L('خصم يوم الغياب (بالأيام)', 'Deduction per absent day (days)'), policy.absenceDeductDays, '', 'min="0" step="0.5"')}
-          ${numField('payrollDayDivisor', L('قسمة الراتب لحساب اليوم', 'Salary divisor for a day'), policy.payrollDayDivisor, L('أجر اليوم = الأساسي ÷ الرقم ده (عادة 30).', 'Day rate = basic ÷ this number (usually 30).'), 'min="20" max="31"')}
+      pane.innerHTML = `<div class="alert info mb-16"><i class="fas fa-circle-info"></i><div>${L('قواعد خصم التأخير والغياب والأونلاين المرفوض والانصراف المبكر بقت لكل موظف لوحده: الموظفين ← تعديل ← «قواعد الخصم». وهيكل الراتب (الأساسي، البدلات، الانتظام، KPI) من «الراتب والبنك».', 'Lateness, absence, rejected-remote and early-leave rules are now set per employee: Employees → Edit → "Deduction rules". The salary structure (basic, allowances, regularity, KPI) is under "Salary & bank".')}</div></div>
+        <div class="card"><form class="card-body form-grid" id="f">
+          ${numField('payrollDayDivisor', L('قسمة الراتب لحساب قيمة اليوم', 'Divisor for a day\'s value'), policy.payrollDayDivisor, L('قيمة اليوم من أي جزء = الجزء ÷ الرقم ده (عادة 30).', 'A day of any part = the part ÷ this number (usually 30).'), 'min="20" max="31"')}
           ${numField('carryOverMax', L('أقصى ترحيل للاعتيادي (أيام)', 'Max annual carry-over (days)'), policy.carryOverMax || 0, '', 'min="0"')}
         </form>${saveBar()}</div>`;
-        const collect = () => { pane.querySelectorAll('#tiers [data-i]').forEach(r => { const t = tiers[r.dataset.i]; t.after = Number(r.querySelector('[data-k=after]').value) || 0; t.day = Number(r.querySelector('[data-k=day]').value) || 0; }); };
-        pane.querySelector('#addt').onclick = () => { collect(); tiers.push({ after: 30, day: 0.25 }); draw(); };
-        pane.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { collect(); tiers.splice(Number(b.dataset.rm), 1); draw(); });
-        pane.querySelector('#save').onclick = (e) => busy(e.currentTarget, async () => {
-          collect(); const f = pane.querySelector('#f');
-          try { await savePolicy({ lateDeductionEnabled: f.lateDeductionEnabled.checked, lateTiers: tiers.sort((a, b) => a.after - b.after), absenceDeductDays: Number(f.absenceDeductDays.value) || 0, payrollDayDivisor: Number(f.payrollDayDivisor.value) || 30, carryOverMax: Number(f.carryOverMax.value) || 0 }); toast(L('تم الحفظ', 'Saved')); } catch (ex) { toastErr(ex); }
-        });
-      };
-      draw();
+      pane.querySelector('#save').onclick = (e) => busy(e.currentTarget, async () => {
+        const f = pane.querySelector('#f');
+        try { await savePolicy({ payrollDayDivisor: Number(f.payrollDayDivisor.value) || 30, carryOverMax: Number(f.carryOverMax.value) || 0 }); toast(L('تم الحفظ', 'Saved')); } catch (ex) { toastErr(ex); }
+      });
     },
     async system() {
       pane.innerHTML = loader();

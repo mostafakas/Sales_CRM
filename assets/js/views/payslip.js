@@ -5,6 +5,7 @@ import { modal, toastErr } from '../core/ui.js';
 import { toMs } from '../core/fb.js';
 import { person, nameOf } from '../services/directory.js';
 import { PAY_STATUS, payStatus, payStatusLabel, loadProof } from '../services/payroll.js';
+import { partLabel, violationText } from '../services/salary.js';
 
 // ---------- amount in Arabic words ("فقط ثمانية عشر ألفاً وخمسمائة جنيه مصري لا غير") ----------
 const ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
@@ -48,8 +49,12 @@ export function payslipHTML(i) {
   const earnings = [
     [L('الراتب الأساسي', 'Basic salary'), i.basic, ''],
     ...((i.allowanceLines || []).length ? i.allowanceLines.map(x => [x.name || L('بدل', 'Allowance'), x.amount, L('بدل ثابت', 'Fixed allowance')]) : (i.allowances ? [[L('البدلات', 'Allowances'), i.allowances, '']] : [])),
+    ...(i.regularity ? [[L('بدل الانتظام', 'Regularity'), i.regularity, '']] : []),
+    ...(i.kpiFull || i.kpi ? [['KPI', i.kpi || 0, i.kpiMode === 'pct' ? L(`${i.kpiValue}% من ${money(i.kpiFull, false)}`, `${i.kpiValue}% of ${money(i.kpiFull, false)}`) : (i.kpiMode === 'amt' ? L(`من ${money(i.kpiFull, false)}`, `of ${money(i.kpiFull, false)}`) : '')]] : []),
     ...(i.bonus ? [[L('مكافأة', 'Bonus'), i.bonus, '']] : []), ...(i.incentive ? [[L('حوافز', 'Incentive'), i.incentive, '']] : [])
   ];
+  const fromParts = (l) => Object.entries(l.amounts || {}).map(([p, v]) => `${partLabel(p)} ${money(v, false)}`).join(' + ');
+  const violationRows = (i.violations || []).map(l => [violationText(l), l.total, `${fmtDate(l.date)}${Object.keys(l.amounts || {}).length > 1 ? ` · ${fromParts(l)}` : ''}`]);
   const rate = Number(i.dayRate) || 0;
   const advSub = (() => {
     const r = (i.advanceRefs || [])[0];
@@ -59,9 +64,11 @@ export function payslipHTML(i) {
   })();
   const deds = [
     ...(i.fixed ? [[L('خصومات ثابتة (تأمينات...)', 'Fixed deductions (insurance…)'), i.fixed, '']] : []),
-    ...(i.absenceDeduction ? [[L('غياب', 'Absence'), i.absenceDeduction, L(`${num(i.absenceDays, 1)} يوم × ${money(rate, false)} أجر اليوم`, `${num(i.absenceDays, 1)} day(s) × ${money(rate, false)} day rate`)]] : []),
+    ...(i.violations ? violationRows : [ // salaries calculated before the per-employee rules
+      ...(i.absenceDeduction ? [[L('غياب', 'Absence'), i.absenceDeduction, L(`${num(i.absenceDays, 1)} يوم × ${money(rate, false)} أجر اليوم`, `${num(i.absenceDays, 1)} day(s) × ${money(rate, false)} day rate`)]] : []),
+      ...(i.lateDeduction ? [[L('تأخير', 'Lateness'), i.lateDeduction, L(`${fmtMin(i.lateMinutes)} إجمالي · ${num(i.lateDays, 2)} يوم خصم`, `${fmtMin(i.lateMinutes)} total · ${num(i.lateDays, 2)} day(s) deducted`)]] : [])
+    ]),
     ...(i.unpaidDeduction ? [[L('إجازة بدون أجر', 'Unpaid leave'), i.unpaidDeduction, L(`${num(i.unpaidDays)} يوم × ${money(rate, false)}`, `${num(i.unpaidDays)} day(s) × ${money(rate, false)}`)]] : []),
-    ...(i.lateDeduction ? [[L('تأخير', 'Lateness'), i.lateDeduction, L(`${fmtMin(i.lateMinutes)} إجمالي · ${num(i.lateDays, 2)} يوم خصم`, `${fmtMin(i.lateMinutes)} total · ${num(i.lateDays, 2)} day(s) deducted`)]] : []),
     ...(i.advance ? [[L('قسط سلفة', 'Advance installment'), i.advance, advSub]] : []),
     ...((i.otherDeductions || []).map(d => [d.reason || L('خصم', 'Deduction'), d.amount, L('خصم إضافي', 'Other deduction')]))
   ];

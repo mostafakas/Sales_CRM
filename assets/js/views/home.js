@@ -1,6 +1,6 @@
 // "My day": start/end the day, switch status, live timers, balances, today's log.
 import { L, esc, fmtDur, fmtTime, fmtHours, fmtMin, ymd, addDays, fmtDate, num, zparts } from '../core/utils.js';
-import { toast, toastErr, modal, avatar, presenceBadge, STATUS_META, busy, confirmDialog, empty } from '../core/ui.js';
+import { toast, toastErr, modal, avatar, presenceBadge, STATUS_META, busy, confirmDialog, empty, livePop } from '../core/ui.js';
 import { session, now } from '../core/session.js';
 import { policy, dayKey, planFor, lateness, modeLabel, MODE_META, typeLabel, statusLabel, REQUEST_STATUS, leaveTypeLabel, isWorkingPlan } from '../core/policy.js';
 import { toMs, watch, query, col, where } from '../core/fb.js';
@@ -127,7 +127,7 @@ export default async function render(root) {
       const mode = b.dataset.mode;
       try {
         const needsReq = mode === 'remote' && policy.remoteNeedsApproval && !approvedRemote && !endedToday() && isWorkingPlan(plan);
-        const wasStale = !!staleDay(u());
+        const wasStale = staleDay(u());
         const res = await startDay(mode, { remoteApproved: !needsReq });
         if (needsReq) {
           const { submitRequest } = await import('../services/requests.js');
@@ -135,7 +135,9 @@ export default async function render(root) {
           catch (e) { console.warn(e); toast(L('مقدرتش أبعت طلب الأونلاين تلقائياً', 'Could not send the remote request automatically'), e.userMessage || L('قدّمه من «طلباتي».', 'Submit it from My requests.'), 'warn'); }
         }
         m.close();
-        toast(res.resumed ? L('كمّلت يومك', 'Day resumed') : L('يومك بدأ، بالتوفيق!', 'Your day has started. Have a great one!'), wasStale ? L('اليوم اللي فات اتقفل تلقائياً.', 'Your previous day was closed automatically.') : '');
+        toast(res.resumed ? L('كمّلت يومك', 'Day resumed') : L('يومك بدأ، بالتوفيق!', 'Your day has started. Have a great one!'));
+        // forgetting to end the day costs nothing, but the employee is warned on the next working day
+        if (wasStale) livePop({ icon: 'fa-triangle-exclamation', cls: 'warn', title: L('تحذير: نسيت تنهي يومك', 'Warning: you did not end your day'), text: L(`يوم ${fmtDate(wasStale)} ما اتقفلش، فاتقفل تلقائياً على ميعاد انصرافك. المرة الجاية اضغط «إنهاء اليوم» قبل ما تمشي.`, `${fmtDate(wasStale)} was not ended, so it was closed at your planned end time. Next time press "End day" before you leave.`), ttl: 30000 });
       } catch (e) { toastErr(e); }
     }));
   }

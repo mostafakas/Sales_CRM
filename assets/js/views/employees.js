@@ -11,6 +11,7 @@ import { publicConfig, toLogin, callService } from '../services/authsvc.js';
 import { renameAccount, renameStepText } from '../services/rename.js';
 import { forceLogout, LEADER_ROLES } from '../core/session.js';
 import { balanceTable } from './profile.js';
+import { PARTS, partLabel, salaryParts, rulesOf } from '../services/salary.js';
 import { requestCard, showRequestDetails } from './request-card.js';
 
 const genPassword = () => {
@@ -71,6 +72,11 @@ export async function openEditor(email) {
   const u = isNew ? {} : (person(email) || await read('users', email) || {});
   const priv = isNew ? {} : (await read('employees_private', email).catch(() => null) || {});
   const sal = priv.salary || {};
+  // salary structure: saved one, or built from the old basic + allowances (as amounts)
+  const legacy = salaryParts(priv);
+  const struct = sal.parts && Number(sal.total) ? { total: Number(sal.total), parts: { ...Object.fromEntries(PARTS.map(p => [p, { mode: 'pct', value: 0 }])), ...sal.parts } }
+    : { total: legacy.total || '', parts: { basic: { mode: 'amt', value: legacy.basic || 0 }, allowances: { mode: 'amt', value: legacy.allowances || 0 }, regularity: { mode: 'amt', value: 0 }, kpi: { mode: 'amt', value: 0 } } };
+  const rules = rulesOf(priv);
   const people = allPeople().filter(p => !p.isSuspended && p.email !== email);
   const deptList = departments();
   const pcfg = await publicConfig().catch(() => ({}));
@@ -87,6 +93,7 @@ export async function openEditor(email) {
         <button class="tab" data-p="hours">${L('مواعيد العمل', 'Work hours')}</button>
         <button class="tab" data-p="leave">${L('الإجازات والأونلاين', 'Leave & remote')}</button>
         <button class="tab" data-p="pay">${L('الراتب والبنك', 'Salary & bank')}</button>
+        <button class="tab" data-p="rules">${L('قواعد الخصم', 'Deduction rules')}</button>
         <button class="tab" data-p="access">${L('الصلاحيات', 'Access')}</button></div>
       <form id="ef" autocomplete="off">
         <div data-pane="basic" class="form-grid">
@@ -139,13 +146,39 @@ export async function openEditor(email) {
           </div>
         </div>
         <div data-pane="pay" class="form-grid hidden">
-          <div class="field"><label>${L('الراتب الأساسي (شهري)', 'Basic salary (monthly)')}</label><input class="input num" type="number" min="0" name="basic" value="${esc(sal.basic ?? '')}"></div>
+          <div class="field"><label>${L('الراتب الكامل (شهري)', 'Full salary (monthly)')}</label><input class="input num" type="number" min="0" name="total" value="${esc(struct.total || '')}"></div>
           <div class="field"><label>${L('خصومات ثابتة (تأمينات...)', 'Fixed deductions (insurance…)')}</label><input class="input num" type="number" min="0" name="fixedDeductions" value="${esc(sal.fixedDeductions ?? '')}"></div>
-          <div class="field span-2"><label>${L('البدلات الثابتة', 'Fixed allowances')}</label><div id="allow" class="col gap-8"></div><button type="button" class="btn btn-sm btn-soft" id="add-allow" style="align-self:flex-start"><i class="fas fa-plus"></i> ${L('إضافة بدل', 'Add allowance')}</button></div>
+          <div class="field span-2"><label>${L('أجزاء الراتب — كل جزء نسبة من الراتب الكامل أو قيمة', 'Salary parts — each a % of the full salary or an amount')}</label>
+            <div class="table-wrap" style="border:1px solid var(--border);border-radius:12px"><table class="table sal-parts"><tbody>
+              ${PARTS.map(p => { const x = struct.parts[p]; return `<tr data-part="${p}"><td><b>${esc(partLabel(p))}</b></td>
+                <td><select class="select" data-mode style="min-width:110px"><option value="pct" ${x.mode === 'pct' ? 'selected' : ''}>${L('نسبة %', '%')}</option><option value="amt" ${x.mode === 'amt' ? 'selected' : ''}>${L('قيمة', 'Amount')}</option></select></td>
+                <td><input class="input num" type="number" min="0" step="0.01" data-val value="${esc(x.value)}" style="max-width:130px"></td>
+                <td class="num" data-amt style="white-space:nowrap"></td></tr>`; }).join('')}
+            </tbody></table></div>
+            <div class="xs muted mt-4">${L('الـ KPI بيتصرف كامل كل شهر، إلا لو حددتله نسبة أو قيمة من صفحة الرواتب (القلم) للشهر ده.', 'KPI is paid in full each month unless you set a % or amount for that month on the Payroll page (pencil).')}</div></div>
           <div class="field"><label>${L('رقم الحساب البنكي', 'Bank account')}</label><input class="input" name="bank" dir="ltr" value="${esc(priv.bank || '')}"></div>
           <div class="field"><label>InstaPay</label><input class="input" name="instapay" dir="ltr" value="${esc(priv.instapay || '')}"></div>
           <div class="span-2 alert info" id="paysum"></div>
           <p class="span-2 xs muted"><i class="fas fa-lock"></i> ${L('بيانات الراتب والبنك محفوظة في مكان منفصل ومحدش يشوفها غير الموظف نفسه وHR والمالية.', 'Salary and bank data are stored separately — visible only to the employee, HR and finance.')}</p>
+        </div>
+        <div data-pane="rules" class="col gap-16 hidden">
+          <div class="alert info"><i class="fas fa-circle-info"></i><div>${L('الخصومات دي بتتحسب لوحدها من حضور الموظف وقت حساب الرواتب. أي إذن تأخير أو تصحيح حضور أو إجازة معتمدة لنفس اليوم بيلغي المخالفة.', 'These deductions are calculated from attendance when payroll is built. An approved permission, correction or leave for the same day cancels the violation.')}</div></div>
+          <div class="pw-box"><b>${L('التأخير (بعد فترة السماح) — لكل مرة، من الانتظام', 'Lateness (after the grace period) — per time, from regularity')}</b>
+            <div class="form-grid mt-12">
+              ${rules.late.tiers.map((t, n) => `<div class="field"><label>${t.upTo ? L(`لحد ${t.upTo} دقيقة`, `Up to ${t.upTo} min`) : L(`أكتر من ${rules.late.tiers[n - 1] ? rules.late.tiers[n - 1].upTo : 0} دقيقة`, `Over ${rules.late.tiers[n - 1] ? rules.late.tiers[n - 1].upTo : 0} min`)}</label>
+                <div class="row gap-8"><input class="input num" type="number" min="0" max="100" step="0.5" data-tier="${n}" value="${esc(t.pct)}" style="max-width:110px"><span class="small muted">% ${L('من الانتظام', 'of regularity')}</span></div></div>`).join('')}
+              <div class="field"><label>${L('الحد الأقصى لخصم التأخير في الشهر', 'Monthly cap for lateness')}</label><div class="row gap-8"><input class="input num" type="number" min="0" max="100" name="lateCap" value="${esc(rules.late.capPct)}" style="max-width:110px"><span class="small muted">% ${L('من الانتظام', 'of regularity')}</span></div></div>
+            </div></div>
+          <div class="pw-box"><b>${L('الغياب بدون إذن — من الأساسي والبدلات والانتظام', 'Absence without leave — from basic, allowances and regularity')}</b>
+            <div class="form-grid mt-12">
+              <div class="field"><label>${L('أول يوم غياب في الشهر', 'First absence in the month')}</label><div class="row gap-8"><input class="input num" type="number" min="0" step="0.25" name="absFirst" value="${esc(rules.absence.first)}" style="max-width:110px"><span class="small muted">× ${L('قيمة اليوم', 'day value')}</span></div></div>
+              <div class="field"><label>${L('كل يوم غياب بعده', 'Each absence after that')}</label><div class="row gap-8"><input class="input num" type="number" min="0" step="0.25" name="absNext" value="${esc(rules.absence.next)}" style="max-width:110px"><span class="small muted">× ${L('قيمة اليوم', 'day value')}</span></div></div>
+            </div></div>
+          <div class="pw-box row between"><div><b>${L('أونلاين اترفض طلبه', 'Remote day with a rejected request')}</b><div class="xs muted">${L('خصم قيمة اليوم من الانتظام والبدلات', 'Deduct a day of regularity and allowances')}</div></div><label class="switch"><input type="checkbox" name="remoteRejected" ${rules.remoteRejected ? 'checked' : ''}><span></span></label></div>
+          <div class="pw-box"><b>${L('الانصراف المبكر — لكل مرة، من الانتظام', 'Leaving early — per time, from regularity')}</b>
+            <div class="row gap-8 mt-12"><select class="select" name="earlyMode" style="max-width:150px"><option value="pct" ${rules.early.mode !== 'amt' ? 'selected' : ''}>${L('نسبة %', '%')}</option><option value="amt" ${rules.early.mode === 'amt' ? 'selected' : ''}>${L('قيمة ثابتة', 'Fixed amount')}</option></select>
+              <input class="input num" type="number" min="0" step="0.5" name="earlyValue" value="${esc(rules.early.value)}" style="max-width:130px"><span class="xs muted">${L('0 = مفيش خصم', '0 = no deduction')}</span></div></div>
+          <p class="xs muted"><i class="fas fa-bell"></i> ${L('نسيان قفل اليوم: مفيش خصم — الموظف بيوصله تحذير في أول يوم شغل بعده.', 'Forgetting to end the day: no deduction — the employee gets a warning on their next working day.')}</p>
         </div>
         <div data-pane="access" class="col gap-16 hidden">
           ${!isNew && isAdmin() ? `<div class="pw-box"><div class="row gap-12"><span class="icon-tile"><i class="fas fa-user-pen"></i></span><div class="grow"><b>${L('تغيير اسم المستخدم', 'Change username')}</b>
@@ -171,24 +204,29 @@ export async function openEditor(email) {
   let photo = u.photo || '';
   m.$('#ph').onchange = async (e) => { try { photo = await imageToDataUrl(e.target.files[0], 240, 0.8); m.$('[data-pane=basic] .avatar').outerHTML = avatar({ ...u, photo }, 'lg'); } catch { toast(L('الصورة مش صالحة', 'Invalid image'), '', 'bad'); } };
   m.$$('#et .tab').forEach(b => b.onclick = () => { m.$$('#et .tab').forEach(x => x.classList.toggle('active', x === b)); m.$$('[data-pane]').forEach(p => p.classList.toggle('hidden', p.dataset.pane !== b.dataset.p)); });
-  const allowBox = m.$('#allow');
-  const addAllow = (a = {}) => {
-    const row = document.createElement('div'); row.className = 'row gap-8';
-    row.innerHTML = `<input class="input" data-an placeholder="${L('اسم البدل', 'Name')}" value="${esc(a.name || '')}"><input class="input num" data-aa type="number" min="0" placeholder="${L('المبلغ', 'Amount')}" value="${esc(a.amount ?? '')}" style="max-width:140px"><button type="button" class="btn btn-ghost btn-icon btn-sm"><i class="fas fa-trash"></i></button>`;
-    row.querySelector('button').onclick = () => row.remove();
-    allowBox.appendChild(row);
+  // salary parts, live: each part's amount and whether they add up to the full salary
+  const readStruct = () => {
+    const total = Number(f.total.value || 0);
+    const parts = {}, amounts = {};
+    m.$$('tr[data-part]').forEach(tr => {
+      const p = tr.dataset.part, mode = tr.querySelector('[data-mode]').value, value = Number(tr.querySelector('[data-val]').value || 0);
+      parts[p] = { mode, value };
+      amounts[p] = Math.round((mode === 'pct' ? total * value / 100 : value) * 100) / 100;
+    });
+    const sum = Math.round(PARTS.reduce((t, p) => t + amounts[p], 0) * 100) / 100;
+    return { total, parts, amounts, sum, ok: total > 0 ? Math.abs(sum - total) < 0.01 : sum === 0 };
   };
-  (sal.allowances || []).forEach(addAllow);
-  m.$('#add-allow').onclick = () => { addAllow(); paySum(); };
-  // what payroll will use, live
   const paySum = () => {
-    const basic = Number(f.basic.value || 0), fixed = Number(f.fixedDeductions.value || 0);
-    const al = [...allowBox.children].reduce((t, r) => t + Number(r.querySelector('[data-aa]').value || 0), 0);
-    m.$('#paysum').innerHTML = `<i class="fas fa-calculator"></i><div>${L('في الرواتب:', 'In payroll:')} <b class="num">${esc(money(basic, false))}</b> ${L('أساسي', 'basic')} + <b class="num">${esc(money(al, false))}</b> ${L('بدلات', 'allowances')} = <b class="num">${esc(money(basic + al, false))}</b> ${L('إجمالي', 'gross')}${fixed ? ` − <b class="num">${esc(money(fixed, false))}</b> ${L('ثابتة', 'fixed')}` : ''}
-      <div class="xs muted mt-4">${L('لو مسودة رواتب الشهر محسوبة قبل كده، اضغط «إعادة الحساب» في صفحة الرواتب بعد الحفظ.', 'If this month’s payroll draft was already calculated, press "Recalculate" on the Payroll page after saving.')}</div></div>`;
+    const s = readStruct(), fixed = Number(f.fixedDeductions.value || 0);
+    m.$$('tr[data-part]').forEach(tr => { tr.querySelector('[data-amt]').textContent = money(s.amounts[tr.dataset.part], false); });
+    m.$('#paysum').className = `span-2 alert ${s.ok ? 'info' : 'bad'}`;
+    m.$('#paysum').innerHTML = `<i class="fas fa-calculator"></i><div>${s.ok
+      ? `${L('في الرواتب:', 'In payroll:')} ${PARTS.map(p => `${esc(partLabel(p))} <b class="num">${esc(money(s.amounts[p], false))}</b>`).join(' + ')} = <b class="num">${esc(money(s.sum, false))}</b>${fixed ? ` − <b class="num">${esc(money(fixed, false))}</b> ${L('ثابتة', 'fixed')}` : ''}`
+      : L(`مجموع الأجزاء ${money(s.sum, false)} ومش مساوي للراتب الكامل ${money(s.total, false)} — الفرق ${money(s.total - s.sum, false)}.`, `Parts add up to ${money(s.sum, false)}, not the full salary ${money(s.total, false)} — difference ${money(s.total - s.sum, false)}.`)}
+      <div class="xs muted mt-4">${L('لو رواتب الشهر محسوبة قبل كده، اضغط «إعادة الحساب» في صفحة الرواتب بعد الحفظ.', 'If this month’s payroll was already calculated, press "Recalculate" on the Payroll page after saving.')}</div></div>`;
   };
   m.$('[data-pane=pay]').addEventListener('input', paySum);
-  m.$('[data-pane=pay]').addEventListener('click', (e) => { if (e.target.closest('.btn-ghost')) setTimeout(paySum, 0); });
+  m.$('[data-pane=pay]').addEventListener('change', paySum);
   paySum();
   const teamBox = m.$('#team-box');
   const drawTeam = () => {
@@ -276,6 +314,14 @@ export async function openEditor(email) {
     if (val('leaderEmail') === newEmail) { err.textContent = L('الموظف مينفعش يكون مدير نفسه.', 'An employee cannot manage themselves.'); err.classList.remove('hidden'); return; }
     if (!!val('workStart') !== !!val('workEnd')) { m.$$('#et .tab').find(x => x.dataset.p === 'hours').click(); return fail(L('حدد ميعاد الحضور والانصراف الاتنين، أو سيبهم فاضيين لمواعيد الشركة.', 'Set both start and end times, or leave both empty for company hours.')); }
     if (val('workStart') && val('workEnd') <= val('workStart')) { m.$$('#et .tab').find(x => x.dataset.p === 'hours').click(); return fail(L('ميعاد الانصراف لازم يكون بعد ميعاد الحضور في نفس اليوم.', 'The end time must be after the start time on the same day.')); }
+    const st = readStruct();
+    if (!selfLocked && !st.ok) { m.$$('#et .tab').find(x => x.dataset.p === 'pay').click(); return fail(L('مجموع أجزاء الراتب لازم يساوي الراتب الكامل بالظبط.', 'The salary parts must add up to the full salary exactly.')); }
+    const newRules = {
+      late: { tiers: rules.late.tiers.map((t, n) => ({ upTo: t.upTo, pct: Number((m.$(`[data-tier="${n}"]`) || {}).value || 0) })), capPct: Number(val('lateCap') || 0) },
+      absence: { first: Number(val('absFirst') || 0), next: Number(val('absNext') || 0) },
+      remoteRejected: !!(f.remoteRejected && f.remoteRejected.checked),
+      early: { mode: f.earlyMode.value === 'amt' ? 'amt' : 'pct', value: Number(val('earlyValue') || 0) }
+    };
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
       gender: f.gender.value, hireDate: val('hireDate'), remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
@@ -286,10 +332,11 @@ export async function openEditor(email) {
     // a non-admin cannot change their own role, access or suspension (the rules reject it)
     if (!isNew && email === session.email && !isAdmin()) { delete pub.role; delete pub.permissions; delete pub.isSuspended; }
     if (!isNew && !(email === session.email && !isAdmin())) pub.isSuspended = !!(f.isSuspended && f.isSuspended.checked);
-    const allowances = [...allowBox.children].map(r => ({ name: r.querySelector('[data-an]').value.trim(), amount: Number(r.querySelector('[data-aa]').value || 0) })).filter(a => a.name || a.amount);
     const privData = {
       email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value, contactEmail,
-      salary: { basic: Number(val('basic') || 0), fixedDeductions: Number(val('fixedDeductions') || 0), allowances }, updatedAt: serverTimestamp()
+      // basic kept as a plain number too, for anything that still reads salary.basic; the old allowance list is replaced by the parts
+      salary: { total: st.total, parts: st.parts, basic: st.amounts.basic, fixedDeductions: Number(val('fixedDeductions') || 0), allowances: [] },
+      rules: newRules, updatedAt: serverTimestamp()
     };
     try {
       if (isNew) {
@@ -406,13 +453,11 @@ async function renderFile(root, email) {
     pay: async (el) => {
       el.innerHTML = loader();
       const p = await read('employees_private', email).catch(() => null) || {};
-      const s = p.salary || {};
-      const allow = (s.allowances || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+      const sp = salaryParts(p);
       el.innerHTML = `<div class="card card-pad"><dl class="kv">
-        <dt>${L('الأساسي', 'Basic')}</dt><dd class="num">${esc(money(s.basic || 0))}</dd>
-        <dt>${L('البدلات', 'Allowances')}</dt><dd class="num">${esc(money(allow))}${(s.allowances || []).length ? ` <span class="xs muted">(${esc(s.allowances.map(a => a.name).join('، '))})</span>` : ''}</dd>
-        <dt>${L('خصومات ثابتة', 'Fixed deductions')}</dt><dd class="num">${esc(money(s.fixedDeductions || 0))}</dd>
-        <dt>${L('الإجمالي قبل الخصومات', 'Gross')}</dt><dd class="num"><b>${esc(money((s.basic || 0) + allow))}</b></dd>
+        <dt>${L('الراتب الكامل', 'Full salary')}</dt><dd class="num"><b>${esc(money(sp.total))}</b></dd>
+        ${PARTS.map(k => `<dt>${esc(partLabel(k))}</dt><dd class="num">${esc(money(sp[k]))}</dd>`).join('')}
+        <dt>${L('خصومات ثابتة', 'Fixed deductions')}</dt><dd class="num">${esc(money(sp.fixed))}</dd>
         <dt>${L('نوع التعاقد', 'Contract')}</dt><dd>${esc(p.contract || '—')}</dd>
         <dt>${L('البنك', 'Bank')}</dt><dd dir="ltr" style="text-align:start">${esc(p.bank || '—')}</dd>
         <dt>InstaPay</dt><dd dir="ltr" style="text-align:start">${esc(p.instapay || '—')}</dd>

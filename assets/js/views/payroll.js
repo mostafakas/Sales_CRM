@@ -6,6 +6,7 @@ import { now, isAdmin } from '../core/session.js';
 import { watch, query, col, where, ref, list, toMs } from '../core/fb.js';
 import { buildRun, saveManual, recordAdvancePayout, PAY_ORDER, PAY_STATUS, payStatus, payStatusLabel, allowedMoves, setPayStatus, MAX_PROOF } from '../services/payroll.js';
 import { openPayslip } from './payslip.js';
+import { salaryParts } from '../services/salary.js';
 import { exportSheet } from './export.js';
 
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -14,8 +15,9 @@ export default async function render(root) {
   const admin = isAdmin();
   let month = ymOf(now()), run = null, items = [], unsubs = [], privs = null;
   // salary data changed after the salary was calculated? (only matters while it is still pending)
-  const salaryOf = (email) => { const p = privs && privs.find(x => x.id === email); const s = (p && p.salary) || {}; return { basic: Number(s.basic) || 0, allowances: (s.allowances || []).reduce((t, a) => t + (Number(a.amount) || 0), 0), fixed: Number(s.fixedDeductions) || 0 }; };
-  const isStale = (i) => { if (!privs || !admin || payStatus(i) !== 'pending') return false; const c = salaryOf(i.email); return c.basic !== Number(i.basic || 0) || Math.round(c.allowances) !== Math.round(Number(i.allowances || 0)) || c.fixed !== Number(i.fixed || 0); };
+  const salaryOf = (email) => salaryParts((privs && privs.find(x => x.id === email)) || {});
+  const extrasOf = (x) => Number(x.allowances || 0) + Number(x.regularity || 0) + Number(x.kpiFull ?? x.kpi ?? 0);
+  const isStale = (i) => { if (!privs || !admin || payStatus(i) !== 'pending') return false; const c = salaryOf(i.email); return c.basic !== Number(i.basic || 0) || Math.round(c.allowances + c.regularity + c.kpi) !== Math.round(extrasOf(i)) || c.fixed !== Number(i.fixed || 0); };
   const loadPrivs = () => list(col('employees_private')).then(r => { privs = r; draw(); }).catch(() => {});
   root.innerHTML = `
     <div class="page-head"><div><h2>${L('الرواتب', 'Payroll')}</h2><p>${admin
@@ -59,9 +61,13 @@ export default async function render(root) {
     root.querySelector('#rows').innerHTML = items.length ? items.map(i => `<tr>
       <td><div class="person">${avatar({ name: i.name, email: i.email }, 'sm')}<div><b>${esc(i.name)}</b><span>${esc(i.title || '')}</span></div></div></td>
       <td class="num">${esc(money(i.basic || 0, false))}${isStale(i) && salaryOf(i.email).basic !== Number(i.basic || 0) ? `<div><span class="badge warn" title="${L('القيمة الجديدة في ملف الموظف', 'New value in the employee file')}">${L('الجديد', 'New')}: ${esc(money(salaryOf(i.email).basic, false))}</span></div>` : ''}</td>
-      <td class="num">${esc(money((i.allowances || 0) + (i.bonus || 0) + (i.incentive || 0), false))}${isStale(i) && Math.round(salaryOf(i.email).allowances) !== Math.round(Number(i.allowances || 0)) ? `<div><span class="badge warn">${L('البدلات الجديدة', 'New allowances')}: ${esc(money(salaryOf(i.email).allowances, false))}</span></div>` : ''}${(i.allowanceLines || []).length || i.bonus || i.incentive ? `<div class="xs muted">${[...(i.allowanceLines || []).map(a => `${esc(a.name || L('بدل', 'Allowance'))} ${esc(money(a.amount, false))}`), i.bonus ? `${L('مكافأة', 'Bonus')} ${esc(money(i.bonus, false))}` : '', i.incentive ? `${L('حوافز', 'Incentive')} ${esc(money(i.incentive, false))}` : ''].filter(Boolean).join(' · ')}</div>` : ''}</td>
+      <td class="num">${esc(money(Number(i.gross || 0) - Number(i.basic || 0), false))}${isStale(i) && Math.round(salaryOf(i.email).allowances + salaryOf(i.email).regularity + salaryOf(i.email).kpi) !== Math.round(extrasOf(i)) ? `<div><span class="badge warn">${L('الجديد', 'New')}: ${esc(money(salaryOf(i.email).allowances + salaryOf(i.email).regularity + salaryOf(i.email).kpi, false))}</span></div>` : ''}${(() => {
+        const bits = [...(i.allowanceLines || []).map(a => [a.name || L('بدل', 'Allowance'), a.amount]),
+          ...((i.allowanceLines || []).length ? [] : [[L('بدلات', 'Allowances'), i.allowances]]), [L('انتظام', 'Regularity'), i.regularity],
+          [`KPI${i.kpiMode ? (i.kpiMode === 'pct' ? ` ${i.kpiValue}%` : ` (${L('محدد', 'set')})`) : ''}`, i.kpi], [L('مكافأة', 'Bonus'), i.bonus], [L('حوافز', 'Incentive'), i.incentive]].filter(x => Number(x[1]) > 0);
+        return bits.length ? `<div class="xs muted">${bits.map(([n, v]) => `${esc(n)} ${esc(money(v, false))}`).join(' · ')}</div>` : ''; })()}</td>
       <td class="num">${esc(money(i.gross, false))}</td>
-      <td class="num">${esc(money(i.deductions || 0, false))}${(() => { const parts = [[L('غياب', 'Absence'), (i.absenceDeduction || 0) + (i.unpaidDeduction || 0)], [L('تأخير', 'Late'), i.lateDeduction], [L('سلفة', 'Advance'), i.advance], [L('ثابتة', 'Fixed'), i.fixed], [L('أخرى', 'Other'), (i.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0)]].filter(x => Number(x[1]) > 0); return parts.length ? `<div class="xs muted">${parts.map(([n, v]) => `${esc(n)} ${esc(money(v, false))}`).join(' · ')}</div>` : ''; })()}</td>
+      <td class="num">${esc(money(i.deductions || 0, false))}${(() => { const parts = [[L('تأخير', 'Late'), i.lateDeduction], [L('غياب', 'Absence'), (i.absenceDeduction || 0) + (i.unpaidDeduction || 0)], [L('أونلاين مرفوض', 'Rejected remote'), i.remoteDeduction], [L('انصراف مبكر', 'Early leave'), i.earlyDeduction], [L('سلفة', 'Advance'), i.advance], [L('ثابتة', 'Fixed'), i.fixed], [L('أخرى', 'Other'), (i.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0)]].filter(x => Number(x[1]) > 0); return parts.length ? `<div class="xs muted">${parts.map(([n, v]) => `${esc(n)} ${esc(money(v, false))}`).join(' · ')}</div>` : ''; })()}${i.structured === false && admin && payStatus(i) === 'pending' ? `<div><span class="badge warn" title="${L('حدد الراتب الكامل وأجزاءه من ملف الموظف', 'Set the full salary and its parts in the employee file')}">${L('هيكل الراتب مش متحدد', 'No salary structure')}</span></div>` : ''}</td>
       <td class="num"><b>${esc(money(i.net, false))}</b></td>
       <td>${statusCell(i)}</td>
       <td style="text-align:end;white-space:nowrap">
@@ -159,6 +165,9 @@ export default async function render(root) {
       const m = modal({
         title: `${L('تعديل', 'Adjust')} — ${i.name}`, icon: 'fa-pen', size: '',
         body: `<form class="form-grid" id="ef">
+          <div class="field span-2"><label>${L(`KPI الشهر ده (الكامل ${money(i.kpiFull || 0, false)})`, `This month's KPI (full ${money(i.kpiFull || 0, false)})`)}</label>
+            <div class="row gap-8"><select class="select" name="kpiMode" style="max-width:170px"><option value="" ${!i.kpiMode ? 'selected' : ''}>${L('كامل', 'Full')}</option><option value="pct" ${i.kpiMode === 'pct' ? 'selected' : ''}>${L('نسبة %', '%')}</option><option value="amt" ${i.kpiMode === 'amt' ? 'selected' : ''}>${L('قيمة', 'Amount')}</option></select>
+              <input class="input num" type="number" min="0" step="0.01" name="kpiValue" value="${esc(i.kpiMode ? i.kpiValue : '')}" style="max-width:140px" ${!i.kpiMode ? 'disabled' : ''}></div></div>
           <div class="field"><label>${L('مكافأة', 'Bonus')}</label><input class="input num" type="number" min="0" name="bonus" value="${esc(i.bonus || 0)}"></div>
           <div class="field"><label>${L('حوافز', 'Incentive')}</label><input class="input num" type="number" min="0" name="incentive" value="${esc(i.incentive || 0)}"></div>
           <div class="field span-2"><label>${L('خصومات إضافية', 'Other deductions')}</label><div id="od" class="col gap-8"></div><button type="button" class="btn btn-sm btn-soft mt-8" id="addod" style="align-self:flex-start"><i class="fas fa-plus"></i> ${L('خصم', 'Deduction')}</button></div>
@@ -170,16 +179,19 @@ export default async function render(root) {
       const add = (d = {}) => { const r = document.createElement('div'); r.className = 'row gap-8'; r.innerHTML = `<input class="input" data-r placeholder="${L('السبب', 'Reason')}" value="${esc(d.reason || '')}"><input class="input num" type="number" min="0" data-a value="${esc(d.amount ?? '')}" style="max-width:130px"><button type="button" class="btn btn-ghost btn-icon btn-sm"><i class="fas fa-trash"></i></button>`; r.querySelector('button').onclick = () => r.remove(); od.appendChild(r); };
       (i.otherDeductions || []).forEach(add);
       m.$('#addod').onclick = () => add();
+      m.$('[name=kpiMode]').onchange = (e) => { const v = m.$('[name=kpiValue]'); v.disabled = !e.target.value; if (!e.target.value) v.value = ''; else v.focus(); };
       m.$('#sv').onclick = (e) => busy(e.currentTarget, async () => {
         const f = m.$('#ef');
         const otherDeductions = [...od.children].map(r => ({ reason: r.querySelector('[data-r]').value.trim(), amount: Number(r.querySelector('[data-a]').value || 0) })).filter(d => d.amount);
-        try { await saveManual(month, i.email, { bonus: Number(f.bonus.value || 0), incentive: Number(f.incentive.value || 0), otherDeductions, note: f.note.value.trim() }); m.close(); toast(L('تم الحفظ', 'Saved')); } catch (ex) { toastErr(ex); }
+        const kpiMode = f.kpiMode.value;
+        try { await saveManual(month, i.email, { bonus: Number(f.bonus.value || 0), incentive: Number(f.incentive.value || 0), otherDeductions, note: f.note.value.trim(), kpiMode, kpiValue: kpiMode ? Number(f.kpiValue.value || 0) : null }); m.close(); toast(L('تم الحفظ', 'Saved')); } catch (ex) { toastErr(ex); }
       });
     },
     xls: () => exportSheet(`payroll_${month}`, [{
       name: month, rows: items.map(i => ({
-        [L('الموظف', 'Employee')]: i.name, [L('الأساسي', 'Basic')]: i.basic, [L('البدلات', 'Allowances')]: i.allowances, [L('مكافأة', 'Bonus')]: i.bonus, [L('حوافز', 'Incentive')]: i.incentive,
+        [L('الموظف', 'Employee')]: i.name, [L('الأساسي', 'Basic')]: i.basic, [L('البدلات', 'Allowances')]: i.allowances, [L('الانتظام', 'Regularity')]: i.regularity || 0, KPI: i.kpi || 0, [L('مكافأة', 'Bonus')]: i.bonus, [L('حوافز', 'Incentive')]: i.incentive,
         [L('الإجمالي', 'Gross')]: i.gross, [L('ثابتة', 'Fixed')]: i.fixed, [L('غياب', 'Absence')]: i.absenceDeduction, [L('بدون أجر', 'Unpaid')]: i.unpaidDeduction, [L('تأخير', 'Late')]: i.lateDeduction,
+        [L('أونلاين مرفوض', 'Rejected remote')]: i.remoteDeduction || 0, [L('انصراف مبكر', 'Early leave')]: i.earlyDeduction || 0,
         [L('سلف', 'Advance')]: i.advance, [L('أخرى', 'Other')]: (i.otherDeductions || []).reduce((s, d) => s + d.amount, 0), [L('الصافي', 'Net')]: i.net, [L('الحالة', 'Status')]: payStatusLabel(payStatus(i))
       }))
     }])
