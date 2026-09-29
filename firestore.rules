@@ -271,11 +271,35 @@ service cloud.firestore {
     }
     match /payroll_runs/{month} {
       allow read: if isHR() || isFinance();
-      allow write: if isFinance();
+      allow write: if isAdmin();
     }
+    // Salaries: the admin calculates, edits and moves them to any status. The accountant (finance) only moves a
+    // salary forward: approved → paid (with a transfer receipt) → sent (payslip published); never their own salary.
     match /payroll_items/{id} {
       allow read: if isFinance() || isHR() || (active() && resource.data.email == me() && resource.data.published == true);
-      allow write: if isFinance();
+      allow write: if isAdmin();
+      allow update: if isFinance() && resource.data.email != me() && (
+           (resource.data.get('status', '') == 'approved' && request.resource.data.status == 'paid'
+              && onlyChanged(['status', 'paidAt', 'paidBy', 'proof', 'treasuryId', 'advancePaid', 'updatedAt'])
+              && request.resource.data.paidBy == me() && request.resource.data.paidAt == request.time
+              && request.resource.data.proof is map && request.resource.data.proof.get('id', '') is string && request.resource.data.proof.get('id', '') != '')
+        || (resource.data.get('status', '') == 'paid' && request.resource.data.status == 'sent'
+              && onlyChanged(['status', 'published', 'sentAt', 'sentBy', 'updatedAt'])
+              && request.resource.data.published == true && request.resource.data.sentBy == me()));
+    }
+    // transfer receipts (image / PDF in chunks); the employee sees theirs once the payslip is sent
+    match /payroll_proofs/{p} {
+      function itemOf(itemId) { return get(/databases/$(database)/documents/payroll_items/$(itemId)).data; }
+      allow read: if isFinance() || isHR() || (active() && resource.data.email == me() && itemOf(resource.data.itemId).get('published', false) == true);
+      allow create: if isFinance() && request.resource.data.by == me()
+        && request.resource.data.size is number && request.resource.data.size <= 5300000 && request.resource.data.chunks is int && request.resource.data.chunks <= 10;
+      allow delete: if isAdmin();
+      match /chunks/{i} {
+        function proofDoc() { return get(/databases/$(database)/documents/payroll_proofs/$(p)).data; }
+        allow read: if isFinance() || isHR() || (active() && proofDoc().email == me() && itemOf(proofDoc().itemId).get('published', false) == true);
+        allow create: if isFinance() && proofDoc().by == me() && request.resource.data.data is string && request.resource.data.data.size() <= 700000;
+        allow delete: if isAdmin();
+      }
     }
     match /treasury/{id} {
       allow read, write: if isFinance();

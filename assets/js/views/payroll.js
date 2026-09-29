@@ -1,22 +1,26 @@
-// Finance: monthly payroll run — build from attendance, adjust, approve (publish payslips), mark paid.
-import { L, esc, money, num, fmtMonth, addMonths, ym as ymOf, fmtMin, fmtDate, fmtTime } from '../core/utils.js';
+// Finance: monthly payroll. The admin builds and adjusts; each salary then moves
+// pending → approved (admin) → transferred (receipt attached) → payslip sent. The accountant only moves statuses.
+import { L, esc, money, fmtMonth, addMonths, ym as ymOf, fmtDate, fmtTime } from '../core/utils.js';
 import { toast, toastErr, modal, avatar, empty, busy, bindActions, confirmDialog, loader } from '../core/ui.js';
-import { now } from '../core/session.js';
+import { now, isAdmin } from '../core/session.js';
 import { watch, query, col, where, ref, list, toMs } from '../core/fb.js';
-import { buildRun, saveManual, setRunStatus, markPaid, recordAdvancePayout } from '../services/payroll.js';
+import { buildRun, saveManual, recordAdvancePayout, PAY_ORDER, PAY_STATUS, payStatus, payStatusLabel, allowedMoves, setPayStatus, MAX_PROOF } from '../services/payroll.js';
 import { openPayslip } from './payslip.js';
 import { exportSheet } from './export.js';
 
-const RUN_STATUS = { draft: ['مسودة', 'Draft', 'warn'], approved: ['معتمد — القسائم ظاهرة للموظفين', 'Approved — payslips visible', 'brand'], paid: ['تم الصرف', 'Paid', 'ok'], closed: ['أرشيف النظام القديم', 'Legacy archive', ''] };
+const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
 export default async function render(root) {
+  const admin = isAdmin();
   let month = ymOf(now()), run = null, items = [], unsubs = [], privs = null;
-  // salary data changed after the run was calculated?
+  // salary data changed after the salary was calculated? (only matters while it is still pending)
   const salaryOf = (email) => { const p = privs && privs.find(x => x.id === email); const s = (p && p.salary) || {}; return { basic: Number(s.basic) || 0, allowances: (s.allowances || []).reduce((t, a) => t + (Number(a.amount) || 0), 0), fixed: Number(s.fixedDeductions) || 0 }; };
-  const isStale = (i) => { if (!privs || !run || run.status !== 'draft') return false; const c = salaryOf(i.email); return c.basic !== Number(i.basic || 0) || Math.round(c.allowances) !== Math.round(Number(i.allowances || 0)) || c.fixed !== Number(i.fixed || 0); };
+  const isStale = (i) => { if (!privs || !admin || payStatus(i) !== 'pending') return false; const c = salaryOf(i.email); return c.basic !== Number(i.basic || 0) || Math.round(c.allowances) !== Math.round(Number(i.allowances || 0)) || c.fixed !== Number(i.fixed || 0); };
   const loadPrivs = () => list(col('employees_private')).then(r => { privs = r; draw(); }).catch(() => {});
   root.innerHTML = `
-    <div class="page-head"><div><h2>${L('الرواتب', 'Payroll')}</h2><p>${L('الخصومات بتتحسب تلقائياً من الغياب والإجازات بدون أجر والتأخير (لو مفعّل) وأقساط السلف.', 'Deductions are calculated from absence, unpaid leave, lateness (if enabled) and advance installments.')}</p></div>
+    <div class="page-head"><div><h2>${L('الرواتب', 'Payroll')}</h2><p>${admin
+      ? L('الخصومات بتتحسب تلقائياً من الغياب والإجازات بدون أجر والتأخير (لو مفعّل) وأقساط السلف. غيّر حالة كل راتب من العمود «الحالة».', 'Deductions come from absence, unpaid leave, lateness (if enabled) and advance installments. Change each salary\'s status in the "Status" column.')
+      : L('بعد ما الأدمن يعتمد الراتب، سجّل التحويل بإيصاله، وبعدين ابعت القسيمة للموظف.', 'Once the admin approves a salary, record the transfer with its receipt, then send the payslip.')}</p></div>
       <div class="row gap-8"><button class="btn btn-icon" data-m="-1"><i class="fas fa-chevron-right" data-flip></i></button><b id="ml" style="min-width:130px;text-align:center"></b><button class="btn btn-icon" data-m="1"><i class="fas fa-chevron-left" data-flip></i></button></div></div>
     <div class="card mb-16"><div class="card-body row between" style="flex-wrap:wrap;gap:12px" id="bar"></div></div>
     <div class="grid g-4 keep-2 mb-16" id="kpi"></div>
@@ -25,16 +29,23 @@ export default async function render(root) {
     </tr></thead><tbody id="rows"></tbody></table></div></div>
     <div class="card mt-16" id="adv"></div>`;
 
+  const statusBadge = (s) => `<span class="pay-badge ${PAY_STATUS[s].cls}"><i class="fas ${PAY_STATUS[s].icon}"></i>${esc(payStatusLabel(s))}</span>`;
+  function statusCell(i) {
+    const s = payStatus(i);
+    const moves = allowedMoves(i);
+    const receipt = i.proof ? `<div class="xs muted mt-4"><i class="fas fa-paperclip"></i> ${L('إيصال مرفق', 'Receipt attached')}</div>` : '';
+    if (!moves.length) return statusBadge(s) + receipt;
+    const opts = PAY_ORDER.filter(k => k === s || moves.includes(k));
+    return `<select class="pay-select ${PAY_STATUS[s].cls}" data-status="${esc(i.id)}" aria-label="${L('الحالة', 'Status')}">${opts.map(k => `<option value="${k}" ${k === s ? 'selected' : ''}>${esc(payStatusLabel(k))}</option>`).join('')}</select>${receipt}`;
+  }
+
   function draw() {
     root.querySelector('#ml').textContent = fmtMonth(month);
-    const st = run ? (RUN_STATUS[run.status] || RUN_STATUS.draft) : null;
-    const editable = !run || run.status === 'draft';
-    root.querySelector('#bar').innerHTML = `<div class="row gap-8">${st ? `<span class="badge ${st[2]}">${esc(L(st[0], st[1]))}</span>` : `<span class="badge">${L('لسه متعملش', 'Not started')}</span>`}
+    const counts = Object.fromEntries(PAY_ORDER.map(s => [s, items.filter(i => payStatus(i) === s).length]));
+    root.querySelector('#bar').innerHTML = `<div class="row-wrap gap-8">${items.length ? PAY_ORDER.map(s => `<span class="pay-badge ${PAY_STATUS[s].cls}">${esc(payStatusLabel(s))} <b class="num">${counts[s]}</b></span>`).join('') : `<span class="badge">${L('لسه متعملش', 'Not started')}</span>`}
         ${run && run.builtAt ? `<span class="xs muted">${L('آخر حساب:', 'Last calculated:')} ${esc(fmtDate(toMs(run.builtAt)))} ${esc(fmtTime(toMs(run.builtAt)))}</span>` : ''}</div>
       <div class="row-wrap gap-8">
-        ${editable ? `<button class="btn btn-primary" data-action="build"><i class="fas fa-calculator"></i> ${run ? L('إعادة الحساب من الحضور', 'Recalculate from attendance') : L('إنشاء مسودة الرواتب', 'Create payroll draft')}</button>` : ''}
-        ${run && run.status === 'draft' && items.length ? `<button class="btn btn-ok" data-action="approve"><i class="fas fa-check"></i> ${L('اعتماد ونشر القسائم', 'Approve & publish payslips')}</button>` : ''}
-        ${run && run.status === 'approved' ? `<button class="btn" data-action="reopen"><i class="fas fa-rotate-left"></i> ${L('رجوع لمسودة', 'Back to draft')}</button><button class="btn btn-ok" data-action="payall"><i class="fas fa-money-bill-transfer"></i> ${L('تسجيل صرف الكل', 'Mark all paid')}</button>` : ''}
+        ${admin && !(run && run.status === 'closed') ? `<button class="btn btn-primary" data-action="build"><i class="fas fa-calculator"></i> ${items.length ? L('إعادة الحساب من الحضور', 'Recalculate from attendance') : L('إنشاء رواتب الشهر', 'Create this month\'s payroll')}</button>` : ''}
         ${items.length ? `<button class="btn" data-action="xls"><i class="fas fa-file-excel"></i> Excel</button>` : ''}
       </div>`;
     const stale = items.filter(isStale);
@@ -44,7 +55,7 @@ export default async function render(root) {
     const sum = (k) => items.reduce((s, i) => s + (Number(i[k]) || 0), 0);
     const k = (icon, cls, label, v) => `<div class="card stat"><div class="label"><span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>${esc(label)}</div><div class="value" style="font-size:20px">${esc(money(v))}</div></div>`;
     root.querySelector('#kpi').innerHTML = k('fa-sack-dollar', '', L('إجمالي الرواتب', 'Total gross'), sum('gross')) + k('fa-minus', 'bad', L('إجمالي الاستقطاعات', 'Total deductions'), sum('deductions')) +
-      k('fa-wallet', 'ok', L('صافي المطلوب صرفه', 'Net payable'), sum('net')) + k('fa-circle-check', 'info', L('اتصرف', 'Paid so far'), items.filter(i => i.status === 'paid').reduce((s, i) => s + (i.net || 0), 0));
+      k('fa-wallet', 'ok', L('صافي المطلوب صرفه', 'Net payable'), sum('net')) + k('fa-money-bill-transfer', 'info', L('اتحوّل', 'Transferred'), items.filter(i => ['paid', 'sent'].includes(payStatus(i))).reduce((s, i) => s + (i.net || 0), 0));
     root.querySelector('#rows').innerHTML = items.length ? items.map(i => `<tr>
       <td><div class="person">${avatar({ name: i.name, email: i.email }, 'sm')}<div><b>${esc(i.name)}</b><span>${esc(i.title || '')}</span></div></div></td>
       <td class="num">${esc(money(i.basic || 0, false))}${isStale(i) && salaryOf(i.email).basic !== Number(i.basic || 0) ? `<div><span class="badge warn" title="${L('القيمة الجديدة في ملف الموظف', 'New value in the employee file')}">${L('الجديد', 'New')}: ${esc(money(salaryOf(i.email).basic, false))}</span></div>` : ''}</td>
@@ -52,14 +63,77 @@ export default async function render(root) {
       <td class="num">${esc(money(i.gross, false))}</td>
       <td class="num">${esc(money(i.deductions || 0, false))}${(() => { const parts = [[L('غياب', 'Absence'), (i.absenceDeduction || 0) + (i.unpaidDeduction || 0)], [L('تأخير', 'Late'), i.lateDeduction], [L('سلفة', 'Advance'), i.advance], [L('ثابتة', 'Fixed'), i.fixed], [L('أخرى', 'Other'), (i.otherDeductions || []).reduce((s, d) => s + (Number(d.amount) || 0), 0)]].filter(x => Number(x[1]) > 0); return parts.length ? `<div class="xs muted">${parts.map(([n, v]) => `${esc(n)} ${esc(money(v, false))}`).join(' · ')}</div>` : ''; })()}</td>
       <td class="num"><b>${esc(money(i.net, false))}</b></td>
-      <td>${i.status === 'paid' ? `<span class="badge ok">${L('اتصرف', 'Paid')}</span>` : `<span class="badge">${L('مستني', 'Pending')}</span>`}</td>
+      <td>${statusCell(i)}</td>
       <td style="text-align:end;white-space:nowrap">
         <button class="btn btn-sm btn-icon" data-action="slip" data-id="${esc(i.id)}" title="${L('القسيمة', 'Payslip')}"><i class="fas fa-receipt"></i></button>
-        ${editable ? `<button class="btn btn-sm btn-icon" data-action="edit" data-id="${esc(i.id)}" title="${L('تعديل', 'Edit')}"><i class="fas fa-pen"></i></button>` : ''}
-        ${run && run.status === 'approved' && i.status !== 'paid' ? `<button class="btn btn-sm btn-ok" data-action="pay" data-id="${esc(i.id)}">${L('صرف', 'Pay')}</button>` : ''}
+        ${admin && ['pending', 'approved'].includes(payStatus(i)) ? `<button class="btn btn-sm btn-icon" data-action="edit" data-id="${esc(i.id)}" title="${L('تعديل', 'Edit')}"><i class="fas fa-pen"></i></button>` : ''}
       </td></tr>`).join('')
-      : `<tr><td colspan="8">${empty('fa-money-check-dollar', L('مفيش رواتب للشهر ده لسه', 'No payroll for this month yet'), L('اضغط «إنشاء مسودة الرواتب».', 'Click "Create payroll draft".'))}</td></tr>`;
+      : `<tr><td colspan="8">${empty('fa-money-check-dollar', L('مفيش رواتب للشهر ده لسه', 'No payroll for this month yet'), admin ? L('اضغط «إنشاء رواتب الشهر».', 'Click "Create this month\'s payroll".') : L('الأدمن لسه ما حسبش رواتب الشهر ده.', 'The admin has not calculated this month yet.'))}</td></tr>`;
   }
+
+  /** Transfer receipt dialog; `onConfirm({ file, note, onProgress })` runs the transfer (the dialog stays open on failure) */
+  function askProof(i, onConfirm) {
+    {
+      let file = null;
+      const m = modal({
+        title: `${L('تسجيل تحويل الراتب', 'Record salary transfer')} — ${i.name}`, icon: 'fa-money-bill-transfer', size: 'narrow',
+        body: `<div class="col gap-16">
+          <div class="alert info"><i class="fas fa-circle-info"></i><div>${L('صافي الراتب:', 'Net pay:')} <b class="num">${esc(money(i.net))}</b>${i.payTo ? ` · ${esc(i.payTo)}` : ''}</div></div>
+          <label class="dropzone" id="pz"><input type="file" accept="image/*,application/pdf" hidden id="pf"><i class="fas fa-cloud-arrow-up"></i>
+            <div id="pn">${L('إيصال التحويل (إجباري): اختار صورة أو PDF، أو الصق سكرين شوت (Ctrl+V)، أو اسحب الملف هنا', 'Transfer receipt (required): pick an image or PDF, paste a screenshot (Ctrl+V), or drop a file here')}</div></label>
+          <div id="pv"></div>
+          <div class="field"><label>${L('ملاحظة (اختياري) — مثلاً رقم العملية', 'Note (optional) — e.g. transaction number')}</label><input class="input" id="pnote" maxlength="300"></div>
+          <div class="progress hidden" id="pp"><span style="width:0%"></span></div>
+          <p class="xs muted">${L('الإيصال هيظهر للموظف في قسيمته لما تتبعتله.', 'The receipt is shown to the employee on their payslip once it is sent.')}</p></div>`,
+        foot: `<button class="btn" data-close>${L('إلغاء', 'Cancel')}</button><button class="btn btn-ok" id="pok" disabled><i class="fas fa-check"></i> ${L('تأكيد التحويل', 'Confirm transfer')}</button>`
+      });
+      const pick = (f) => {
+        if (!f) return;
+        if (!/^image\//.test(f.type) && f.size > MAX_PROOF) { toast(L('الملف كبير', 'File too large'), L('الحد الأقصى 5 ميجا.', 'Max 5 MB.'), 'bad'); return; }
+        file = f;
+        m.$('#pn').textContent = `${f.name || L('سكرين شوت', 'Screenshot')} · ${fmtSize(f.size)}`;
+        m.$('#pv').innerHTML = /^image\//.test(f.type) ? `<img src="${URL.createObjectURL(f)}" alt="" style="max-height:220px;border-radius:12px;border:1px solid var(--border);margin:auto">` : '';
+        m.$('#pok').disabled = false;
+      };
+      m.$('#pf').onchange = (e) => pick(e.target.files[0]);
+      m.el.addEventListener('paste', (e) => { const f = [...((e.clipboardData && e.clipboardData.files) || [])][0]; if (f) { e.preventDefault(); pick(f); } });
+      const pz = m.$('#pz');
+      pz.ondragover = (e) => { e.preventDefault(); pz.style.borderColor = 'var(--brand)'; };
+      pz.ondragleave = () => { pz.style.borderColor = ''; };
+      pz.ondrop = (e) => { e.preventDefault(); pz.style.borderColor = ''; pick(((e.dataTransfer && e.dataTransfer.files) || [])[0]); };
+      m.$('#pok').onclick = (e) => busy(e.currentTarget, async () => {
+        const bar = m.$('#pp'); bar.classList.remove('hidden');
+        try {
+          await onConfirm({ file, note: m.$('#pnote').value, onProgress: (x) => { bar.firstElementChild.style.width = Math.round(x * 100) + '%'; } });
+          m.close();
+        } catch (ex) { bar.classList.add('hidden'); toastErr(ex); }
+      });
+    }
+  }
+
+  async function changeStatus(sel) {
+    const i = items.find(x => x.id === sel.dataset.status); if (!i) return;
+    const cur = payStatus(i), target = sel.value;
+    sel.value = cur; // stays on the current status until the change is saved
+    if (target === cur) return;
+    const ci = PAY_ORDER.indexOf(cur), ti = PAY_ORDER.indexOf(target);
+    if (ci < 2 && ti >= 2) { askProof(i, (opts) => run_(i, target, opts)); return; }
+    const msg = ci >= 2 && ti < 2
+      ? L(`هيتلغي تسجيل تحويل راتب ${i.name}: حركة الخزينة هتتمسح وقسط السلفة هيرجع، والقسيمة هتختفي من عنده. تكمّل؟`, `${i.name}'s transfer will be undone: the treasury entry is removed, the advance installment returned, and the payslip hidden. Continue?`)
+      : target === 'sent' ? L(`القسيمة هتظهر لـ ${i.name} ويوصله إشعار. تكمّل؟`, `The payslip becomes visible to ${i.name} and they are notified. Continue?`)
+      : `${i.name}: ${payStatusLabel(cur)} ← ${payStatusLabel(target)}`;
+    const ok = await confirmDialog({ title: payStatusLabel(target), message: msg, okText: L('تأكيد', 'Confirm'), okClass: ci >= 2 && ti < 2 ? 'btn-danger' : 'btn-primary' });
+    if (!ok) return;
+    sel.disabled = true;
+    try { await run_(i, target, {}); } catch (ex) { toastErr(ex); } finally { sel.disabled = false; }
+  }
+  async function run_(i, target, opts) {
+    const r = await setPayStatus(i, target, opts);
+    toast(payStatusLabel(target), i.name);
+    if (r && r.legacyTreasury) toast(L('امسح حركة الخزينة يدوياً', 'Remove the treasury entry manually'), L('التحويل ده اتسجل من النسخة القديمة ومش مربوط بحركة خزينة معيّنة.', 'This transfer was recorded by the old version and is not linked to a treasury entry.'), 'warn');
+  }
+  root.addEventListener('change', (e) => { const s = e.target.closest('[data-status]'); if (s) changeStatus(s); });
+
   async function drawAdvances() {
     const advs = await list(query(col('advances'), where('status', '==', 'active'))).catch(() => []);
     root.querySelector('#adv').innerHTML = `<div class="card-head"><h3>${L('السلف الجارية', 'Active advances')}</h3></div>${advs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>${L('الموظف', 'Employee')}</th><th class="num">${L('المبلغ', 'Amount')}</th><th class="num">${L('القسط', 'Installment')}</th><th class="num">${L('المسدد', 'Repaid')}</th><th>${L('من شهر', 'From')}</th><th></th></tr></thead><tbody>
@@ -78,17 +152,7 @@ export default async function render(root) {
     unsubs.push(watch(query(col('payroll_items'), where('month', '==', month)), rows => { items = rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); draw(); }));
   }
   bindActions(root, {
-    build: (_, b) => busy(b, async () => { try { await buildRun(month); await loadPrivs(); toast(L('اتحسبت الرواتب', 'Payroll calculated')); } catch (e) { toastErr(e); } }),
-    approve: async (_, b) => {
-      const ok = await confirmDialog({ title: L('اعتماد الرواتب', 'Approve payroll'), message: L('القسائم هتظهر لكل موظف ويوصله إشعار. تكمّل؟', 'Payslips become visible and employees are notified. Continue?'), okText: L('اعتماد', 'Approve'), okClass: 'btn-ok' });
-      if (ok) busy(b, async () => { try { await setRunStatus(month, 'approved'); toast(L('تم الاعتماد', 'Approved')); } catch (e) { toastErr(e); } });
-    },
-    reopen: (_, b) => busy(b, async () => { try { await setRunStatus(month, 'draft'); } catch (e) { toastErr(e); } }),
-    payall: async (_, b) => {
-      const ok = await confirmDialog({ title: L('تسجيل صرف الرواتب', 'Mark payroll paid'), message: L('هيتسجل صرف كل الرواتب اللي لسه ماتصرفتش في الخزينة، وأقساط السلف هتتخصم.', 'All unpaid salaries are recorded in the treasury and advance installments are applied.'), okText: L('تسجيل الصرف', 'Mark paid'), okClass: 'btn-ok' });
-      if (ok) busy(b, async () => { try { const n = await markPaid(month, items.map(i => i.email)); await setRunStatus(month, 'paid'); toast(L(`اتصرف ${n} راتب`, `${n} salaries paid`)); } catch (e) { toastErr(e); } });
-    },
-    pay: ({ id }, b) => busy(b, async () => { const i = items.find(x => x.id === id); try { await markPaid(month, [i.email]); toast(L('اتسجل الصرف', 'Marked paid')); } catch (e) { toastErr(e); } }),
+    build: (_, b) => busy(b, async () => { try { await buildRun(month); await loadPrivs(); toast(L('اتحسبت الرواتب', 'Payroll calculated'), L('اللي اتعتمد أو بعده ما اتغيّرش.', 'Approved and later salaries were left unchanged.')); } catch (e) { toastErr(e); } }),
     slip: ({ id }) => openPayslip(items.find(x => x.id === id)),
     edit: ({ id }) => {
       const i = items.find(x => x.id === id);
@@ -116,7 +180,7 @@ export default async function render(root) {
       name: month, rows: items.map(i => ({
         [L('الموظف', 'Employee')]: i.name, [L('الأساسي', 'Basic')]: i.basic, [L('البدلات', 'Allowances')]: i.allowances, [L('مكافأة', 'Bonus')]: i.bonus, [L('حوافز', 'Incentive')]: i.incentive,
         [L('الإجمالي', 'Gross')]: i.gross, [L('ثابتة', 'Fixed')]: i.fixed, [L('غياب', 'Absence')]: i.absenceDeduction, [L('بدون أجر', 'Unpaid')]: i.unpaidDeduction, [L('تأخير', 'Late')]: i.lateDeduction,
-        [L('سلف', 'Advance')]: i.advance, [L('أخرى', 'Other')]: (i.otherDeductions || []).reduce((s, d) => s + d.amount, 0), [L('الصافي', 'Net')]: i.net, [L('الحالة', 'Status')]: i.status
+        [L('سلف', 'Advance')]: i.advance, [L('أخرى', 'Other')]: (i.otherDeductions || []).reduce((s, d) => s + d.amount, 0), [L('الصافي', 'Net')]: i.net, [L('الحالة', 'Status')]: payStatusLabel(payStatus(i))
       }))
     }])
   });

@@ -34,6 +34,7 @@ const ACTIONS = {
   'payroll.draft': ['رجّع الرواتب مسودة', 'Reopened payroll', 'fa-rotate-left', 'warn'],
   'payroll.paid': ['قفل صرف الرواتب', 'Closed payroll as paid', 'fa-money-bill-transfer', 'ok'],
   'payroll.pay': ['سجّل صرف رواتب', 'Recorded salary payment', 'fa-money-bill-transfer', 'ok'],
+  'payroll.status': ['غيّر حالة راتب', 'Changed a salary status', 'fa-money-bill-transfer', 'info'],
   'chat.archive': ['أرشف محادثة', 'Archived a chat', 'fa-box-archive', 'warn'],
   'user.create': ['أضاف موظف', 'Added an employee', 'fa-user-plus', 'brand'],
   'user.update': ['عدّل بيانات موظف', 'Edited an employee', 'fa-user-pen', 'info'],
