@@ -41,7 +41,8 @@ export default async function render(root) {
     const plan = planFor(today(), schedule, session.email);
     const h = zparts(now()).h;
     const greet = h < 12 ? L('صباح الخير', 'Good morning') : (h < 17 ? L('مساء الخير', 'Good afternoon') : L('مساء النور', 'Good evening'));
-    const fo = p.dayKey === today() ? toMs(p.firstOnlineAt) : null;
+    const fo0 = p.dayKey === today() ? toMs(p.firstOnlineAt) : null;
+    const fo = fo0 && dayKey(fo0) === today() ? fo0 : null; // ignore a check-in filed under the wrong day
     const late = fo ? lateness(fo, plan) : { late: 0 };
     root.querySelector('#hero').innerHTML = `
       <div class="row gap-16" style="align-items:center;flex-wrap:wrap">

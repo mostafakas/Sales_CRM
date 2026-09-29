@@ -77,6 +77,8 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
   window.dispatchEvent(new Event('am:data-changed'));
   const email = session.email;
   let u = await read('users', email);
+  // the work-day is derived from the clock: re-check it against the server right before starting
+  await Promise.race([syncClock(), new Promise(r => setTimeout(r, 5000))]);
   if (staleDay(u)) {
     // a previous day that can't be closed must not stop the employee from starting today
     try { await closeStaleDay(email, u); u = await read('users', email); }
@@ -86,8 +88,11 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     const at = now();
     const key = dayKey(at);
     const dayRef = doc(db, 'attendance_days', dayDocId(email, key));
-    // "resume" only when today's record really exists (the profile can say today without one)
-    const resuming = u.dayKey === key && !!(await getDoc(dayRef).then(s => s.exists()).catch(() => false));
+    // "resume" only when today's record really exists (the profile can say today without one) and its
+    // check-in really belongs to today (a wrong device clock once filed a late-night start under the next day)
+    const existing = await getDoc(dayRef).then(s => (s.exists() ? s.data() : null)).catch(() => null);
+    const firstIn = toMs(u.firstOnlineAt) || (existing && existing.checkInMs);
+    const resuming = u.dayKey === key && !!existing && (!firstIn || dayKey(firstIn) === key);
     const b = writeBatch(db);
     const bank = resuming ? { ...zeroBank(), ...(u.timeBank || {}) } : zeroBank();
     // checking in within the grace period: not late, and the minutes since the start of the shift count as work

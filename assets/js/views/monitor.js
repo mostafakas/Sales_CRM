@@ -68,7 +68,8 @@ export default async function render(root) {
     const isToday = u.dayKey === t;
     const plan = planFor(t, schedules[u.email] || null, u);
     const on = isToday && u.status && u.status !== 'Offline';
-    const fo = isToday ? toMs(u.firstOnlineAt) : null;
+    const fo0 = isToday ? toMs(u.firstOnlineAt) : null;
+    const fo = fo0 && dayKey(fo0) === t ? fo0 : null; // a check-in from another day (wrong device clock) is ignored
     let state;
     if (on) state = FROM_STATUS[u.status] || 'working';
     else if (fo) state = 'ended';
@@ -178,8 +179,8 @@ export default async function render(root) {
           <td class="mon-status">${statusCell(u, i)}</td>
           <td>${where_(u, i)}</td>
           <td class="num">${i.fo ? esc(fmtTime(i.fo)) : '<span class="faint">—</span>'}</td>
-          <td>${i.fo ? progress(u, i) : '<span class="faint">—</span>'}</td>
-          <td>${i.fo ? `<div class="num mon-sub">${subTimes(u, i)}</div>` : '<span class="faint">—</span>'}</td>
+          <td>${i.fo || i.on ? progress(u, i) : '<span class="faint">—</span>'}</td>
+          <td>${i.fo || i.on ? `<div class="num mon-sub">${subTimes(u, i)}</div>` : '<span class="faint">—</span>'}</td>
           <td style="text-align:end">${actions(u)}</td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   }
@@ -189,10 +190,10 @@ export default async function render(root) {
       return `<article class="card mon-card ${i.on ? '' : 'idle'}" style="--st:${STATES[i.state].color}">
         <div class="row gap-8">${who(u, i)}${actions(u)}</div>
         <div class="row between gap-8 mon-card-status"><div class="mon-status">${statusCell(u, i)}</div>${where_(u, i)}</div>
-        ${i.fo ? progress(u, i) : ''}
+        ${i.fo || i.on ? progress(u, i) : ''}
         <div class="row between xs muted">
           <span>${i.fo ? `<i class="fas fa-right-to-bracket"></i> <span class="num">${esc(fmtTime(i.fo))}</span>` : L('لسه ما سجّلش حضور', 'Not checked in yet')}</span>
-          ${i.fo ? `<span class="num mon-sub">${subTimes(u, i)}</span>` : ''}
+          ${i.fo || i.on ? `<span class="num mon-sub">${subTimes(u, i)}</span>` : ''}
         </div>
         ${flags(i) ? `<div class="row-wrap gap-4">${flags(i)}</div>` : ''}
       </article>`;
