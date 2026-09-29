@@ -4,7 +4,7 @@ import { publicConfig, savePublicConfig, callService, siteUrl } from '../service
 import { toast, toastErr, busy, confirmDialog, empty, loader, modal } from '../core/ui.js';
 import { isAdmin, session, now } from '../core/session.js';
 import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY } from '../core/policy.js';
-import { list, query, col, orderBy, limit, read, toMs } from '../core/fb.js';
+import { list, query, col, orderBy, limit, read, toMs, serverTimestamp } from '../core/fb.js';
 import { migrate } from '../services/migration.js';
 
 const DAYS = () => isAr ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -146,6 +146,10 @@ export default async function render(root) {
               <div class="xs muted mt-4">${L('بيشغّل «ريسيت الباسورد» و«نسيت كلمة المرور» على إيميل Outlook. خطوات التفعيل في tools/password-service/README.md.', 'Powers "Reset password" and "Forgot password" to Outlook. Setup steps: tools/password-service/README.md.')}</div></div>
             <div class="span-2 row gap-8"><button class="btn btn-primary" type="submit"><i class="fas fa-floppy-disk"></i> ${L('حفظ', 'Save')}</button><button class="btn" type="button" id="svc-test"><i class="fas fa-plug-circle-check"></i> ${L('اختبار الاتصال', 'Test connection')}</button><span class="small" id="svc-out"></span></div>
           </form></section>
+        <section class="card" style="grid-column:1/-1"><div class="card-head"><h3><i class="fas fa-rotate" style="color:var(--brand)"></i> ${L('تحديث السيستم عند الكل', 'Update everyone')}</h3>
+            ${policy.forceReloadAt ? `<span class="xs muted">${L('آخر مرة:', 'Last time:')} ${esc(fmtDate(toMs(policy.forceReloadAt)))} ${esc(fmtTime(toMs(policy.forceReloadAt)))}</span>` : ''}</div>
+          <div class="card-body row between" style="flex-wrap:wrap;gap:12px"><p class="small grow">${L('بعد ما ترفع نسخة جديدة على الموقع، اضغط هنا: كل الصفحات المفتوحة عند الموظفين هتتحدّث لوحدها خلال ثواني وتشتغل بآخر نسخة. محدش بيخرج من حسابه ويومه مش بيتأثر.', 'After publishing a new version, press this: every open page reloads within seconds and runs the latest version. Nobody is signed out and running days are not affected.')}</p>
+            <button class="btn btn-primary" id="reload-all"><i class="fas fa-rotate"></i> ${L('تحديث عند الكل', 'Update everyone')}</button></div></section>
         <section class="card"><div class="card-head"><h3>${L('ترحيل البيانات من النظام القديم', 'Migrate data from the old system')}</h3>${mig && mig.done ? `<span class="badge ok">${L('اتعمل', 'Done')}</span>` : ''}</div>
           <div class="card-body col gap-16">
             <p class="small">${L('بينقل الموظفين والرواتب (لمكان محمي) والأرصدة والطلبات القديمة والجداول وحركات الخزينة للنظام الجديد. البيانات القديمة مش بتتمسح، والتشغيل أكتر من مرة آمن.', 'Moves employees, salaries (to a protected place), balances, old requests, schedules and treasury movements. Old data is kept; re-running is safe.')}</p>
@@ -168,6 +172,12 @@ export default async function render(root) {
             : `<span class="badge bad">${L('الخدمة وصلت بس مفتاح Firebase مش شغال', 'Reached, but the Firebase key is not working')}</span> <span class="xs muted" dir="ltr">${esc(r.detail || (r.configured ? '' : 'SERVICE_ACCOUNT missing'))}</span>`;
         } catch (ex) { o.innerHTML = `<span class="badge bad">${esc(ex.userMessage || ex.message)}</span>`; }
       });
+      pane.querySelector('#reload-all').onclick = async (e) => {
+        const btn = e.currentTarget;
+        const ok = await confirmDialog({ title: L('تحديث السيستم عند الكل', 'Update everyone'), message: L('كل الصفحات المفتوحة (وصفحتك كمان) هتتحدّث خلال ثواني. لو حد كان بيكتب طلب ولسه ما بعتوش هيحتاج يكتبه تاني. تكمّل؟', 'Every open page (yours too) reloads within seconds. A request someone is still typing would need to be re-entered. Continue?'), okText: L('تحديث عند الكل', 'Update everyone') });
+        if (!ok) return;
+        await busy(btn, async () => { try { await savePolicy({ forceReloadAt: serverTimestamp() }); toast(L('اتبعت التحديث للكل', 'Update sent to everyone')); } catch (ex) { toastErr(ex); } });
+      };
       const out = pane.querySelector('#mig-out');
       const showReport = (r, dry) => {
         out.innerHTML = `<div class="alert ${dry ? 'info' : 'ok'}"><div><b>${dry ? L('معاينة — مفيش حاجة اتكتبت', 'Preview — nothing written') : L('تم الترحيل', 'Migration complete')}</b>

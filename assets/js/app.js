@@ -1,13 +1,13 @@
 // App shell: session, navigation by role, router, clock, notifications badge.
 import { L, isAr, esc, setLang, toggleTheme, fmtLongDate, zparts, pad, byId } from './core/utils.js';
 import { requireSession, session, isHR, isLeader, isFinance, isAdmin, isPM, seesAll, hasCRM, canApprove, logout, now } from './core/session.js';
-import { loadPolicy, roleLabel, policy, savePolicy } from './core/policy.js';
+import { loadPolicy, roleLabel, policy, savePolicy, onPolicy } from './core/policy.js';
 import { ymd } from './core/utils.js';
 import { toast, toastErr, modal, avatar } from './core/ui.js';
 import { startDirectory } from './services/directory.js';
 import { startNotifications, onNotifications, unreadCount } from './services/notify.js';
 import { watchInbox } from './services/requests.js';
-import { auth, updatePassword, updateDoc, ref, read, isQuotaError } from './core/fb.js';
+import { auth, updatePassword, updateDoc, ref, read, isQuotaError, toMs } from './core/fb.js';
 
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
@@ -238,9 +238,31 @@ async function boot() {
   if (session.profile && session.profile.mustChangePassword) forcePasswordChange();
   setupCheck();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  watchForcedReload();
   if ('Notification' in window && Notification.permission === 'default') setTimeout(() => { try { Notification.requestPermission(); } catch {} }, 4000);
 }
 boot();
+
+/**
+ * Admin → Settings → System → "Update everyone": writes settings/general.forceReloadAt. Every open page that
+ * loaded before that moment reloads itself (after a short notice) and picks up the latest release.
+ */
+function watchForcedReload() {
+  const bootAt = now();
+  let reloading = false;
+  onPolicy(() => {
+    const t = toMs(policy.forceReloadAt);
+    if (!t || t <= bootAt || reloading) return;
+    reloading = true;
+    toast(L('فيه تحديث جديد للسيستم', 'A new version is available'), L('الصفحة هتتحدّث خلال ثواني…', 'The page will refresh in a few seconds…'), 'info');
+    const go = () => location.reload();
+    setTimeout(() => {
+      const reg = 'serviceWorker' in navigator ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
+      reg.then(r => r && r.update()).catch(() => {}).finally(go);
+      setTimeout(go, 4000); // never wait on the service worker for long
+    }, document.hidden ? 0 : 5000);
+  });
+}
 
 /** Tell people plainly when the Firebase side isn't set up yet (rules not published / old data not migrated). */
 async function setupCheck() {
