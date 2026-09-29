@@ -1,16 +1,17 @@
 // Request card + details dialog, shared by "My requests", "Approvals" and HR screens.
-import { L, esc, fmtDate, fmtTime, num, money, fmtMin, relTime } from '../core/utils.js';
+import { L, esc, fmtDate, fmtTime, num, money, fmtMin, relTime, fmtMonth } from '../core/utils.js';
 import { modal, avatar, empty } from '../core/ui.js';
 import { REQUEST_TYPES, REQUEST_STATUS, typeLabel, statusLabel, leaveTypeLabel, modeLabel } from '../core/policy.js';
 import { toMs } from '../core/fb.js';
 import { person, nameOf } from '../services/directory.js';
 import { getAttachment } from '../services/requests.js';
 
-const STAGE_NAME = { leader: { ar: 'المدير المباشر', en: 'Manager' }, hr: { ar: 'HR', en: 'HR' }, finance: { ar: 'المالية', en: 'Finance' } };
+const STAGE_NAME = { leader: { ar: 'المدير المباشر', en: 'Manager' }, hr: { ar: 'HR', en: 'HR' }, finance: { ar: 'المالية', en: 'Finance' }, admin: { ar: 'الأدمن', en: 'Admin' } };
 const ACTION_TXT = {
   submitted: ['قدّم الطلب', 'submitted'], cancelled: ['ألغى الطلب', 'cancelled'], revoked: ['ألغى الاعتماد', 'revoked approval'],
   approved_leader: ['وافق (المدير)', 'approved (manager)'], approved_hr: ['وافق (HR)', 'approved (HR)'], approved_finance: ['وافق (المالية)', 'approved (finance)'],
-  rejected_leader: ['رفض (المدير)', 'rejected (manager)'], rejected_hr: ['رفض (HR)', 'rejected (HR)'], rejected_finance: ['رفض (المالية)', 'rejected (finance)']
+  rejected_leader: ['رفض (المدير)', 'rejected (manager)'], rejected_hr: ['رفض (HR)', 'rejected (HR)'], rejected_finance: ['رفض (المالية)', 'rejected (finance)'],
+  approved_admin: ['وافق (الأدمن)', 'approved (admin)'], rejected_admin: ['رفض (الأدمن)', 'rejected (admin)'], edited: ['عدّل الطلب', 'edited the request']
 };
 
 export function requestTitle(r) {
@@ -21,7 +22,7 @@ export function requestTitle(r) {
 }
 export function requestWhen(r) {
   if (r.type === 'excuse') return `${fmtDate(r.startDate)} · ${r.fromTime}–${r.toTime} (${fmtMin(r.minutes)})`;
-  if (r.type === 'advance') return `${money(r.amount)} · ${num(r.installments)} ${L('قسط', 'installments')}`;
+  if (r.type === 'advance') return `${money(r.amount)} · ${num(r.installments)} ${L('قسط', 'installments')}${r.perMonth ? ` × ${money(r.perMonth, false)}` : ''}${r.startMonth ? ` · ${fmtMonth(r.startMonth)}${r.endMonth && r.endMonth !== r.startMonth ? ` ← ${fmtMonth(r.endMonth)}` : ''}` : ''}`;
   if (r.type === 'correction') return `${fmtDate(r.startDate)}${r.correction ? ` · ${r.correction.checkIn || '—'} → ${r.correction.checkOut || '—'}` : ''}`;
   if (r.type === 'letter') return r.addressedTo ? `${L('إلى:', 'To:')} ${r.addressedTo}` : fmtDate(r.startDate);
   if (!r.startDate) return '';

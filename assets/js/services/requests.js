@@ -6,7 +6,7 @@ import {
 } from '../core/fb.js';
 import { session, now, isHR, seesAll, isAdmin } from '../core/session.js';
 import {
-  policy, leaveType, leaveTypes, stagesFor, firstStatus, nextStatus, planFor, typeLabel, statusLabel
+  policy, leaveType, leaveTypes, stagesFor, firstStatus, nextStatus, planFor, typeLabel, statusLabel, REQUEST_TYPES
 } from '../core/policy.js';
 import { L, dateRange, normEmail, ymd, cairoMs, uid } from '../core/utils.js';
 import { userError } from '../core/ui.js';
@@ -86,6 +86,7 @@ export function watchInbox(cb) {
   if (isHR()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_hr')), rows => { lists.hr = rows; emit(); }));
   // admins can act on every stage, including other managers' pending approvals
   if (isAdmin()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_leader')), rows => { lists.allLeader = rows; emit(); }));
+  if (isAdmin()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_admin')), rows => { lists.admin = rows; emit(); }));
   if (isFinanceUser()) unsubs.push(watch(query(col('requests'), where('status', '==', 'pending_finance')), rows => { lists.fin = rows; emit(); }));
   return () => unsubs.forEach(u => u && u());
 }
@@ -111,7 +112,17 @@ export function approversFor(stage, req) {
   if (stage === 'leader') return req.leaderEmail ? [req.leaderEmail] : [];
   if (stage === 'hr') return activePeople().filter(p => p.role === 'hr' || p.role === 'supervisor' || p.role === 'admin').map(p => p.email);
   if (stage === 'finance') return activePeople().filter(p => p.role === 'finance' || p.role === 'admin' || (p.permissions && p.permissions.payroll)).map(p => p.email);
+  if (stage === 'admin') return activePeople().filter(p => p.role === 'admin').map(p => p.email);
   return [];
+}
+
+// ---------- salary advance: months ----------
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const addYm = (ym, n) => { const [y, m] = ym.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}`; };
+/** { amount, installments, startMonth } → { perMonth, endMonth } (the last installment takes any rounding remainder) */
+export function advancePlan(amount, installments, startMonth) {
+  const n = Math.max(1, Math.round(Number(installments) || 1));
+  return { amount: r2(amount), installments: n, startMonth, perMonth: r2((Number(amount) || 0) / n), endMonth: startMonth ? addYm(startMonth, n - 1) : '' };
 }
 
 // ---------- submit ----------
@@ -135,6 +146,7 @@ export async function submitRequest(input) {
   const me = session.profile || {};
   const email = session.email;
   const type = input.type;
+  if (!REQUEST_TYPES[type] || REQUEST_TYPES[type].retired) throw userError('نوع الطلب ده مش متاح.', 'This request type is not available.');
   const req = {
     email, name: me.name || email, leaderEmail: me.leaderEmail || '', department: me.department || '',
     type, reason: (input.reason || '').slice(0, 2000), createdMs: now(), createdAt: serverTimestamp(), updatedAt: serverTimestamp()
@@ -189,9 +201,10 @@ export async function submitRequest(input) {
   if (type === 'advance') {
     const amount = Number(input.amount);
     if (!(amount > 0)) throw userError('اكتب مبلغ صحيح.', 'Enter a valid amount.');
-    req.amount = amount; req.installments = Math.max(1, Math.min(24, Number(input.installments) || 1));
+    if (!/^\d{4}-\d{2}$/.test(input.startMonth || '')) throw userError('اختار أول شهر يبدأ فيه الخصم.', 'Choose the first deduction month.');
+    if (input.startMonth < ymd(now()).slice(0, 7)) throw userError('أول شهر خصم مينفعش يكون شهر فات.', 'The first deduction month cannot be in the past.');
+    Object.assign(req, advancePlan(amount, Math.min(24, Number(input.installments) || 1), input.startMonth));
     req.startDate = ymd(now());
-    req.startMonth = input.startMonth || '';
   }
   if (type === 'letter') { req.letterKind = input.letterKind || 'employment'; req.addressedTo = input.addressedTo || ''; req.startDate = ymd(now()); }
   if (!req.startDate) req.startDate = ymd(now());
@@ -228,11 +241,25 @@ export async function cancelRequest(id) {
 }
 
 // ---------- decide ----------
-export async function decide(id, action, note = '') {
+export async function decide(id, action, note = '', edits = null) {
   window.dispatchEvent(new Event('am:data-changed'));
-  const r = await read('requests', id);
+  let r = await read('requests', id);
   if (!r) throw userError('الطلب مش موجود.', 'Request not found.');
   if (!String(r.status).startsWith('pending')) throw userError('الطلب ده اتقفل بالفعل.', 'This request was already closed.');
+  // the admin may change a salary advance before approving it; the change is written into the request's history
+  if (action === 'approve' && r.type === 'advance' && edits) {
+    const plan = advancePlan(edits.amount, edits.installments, edits.startMonth);
+    if (!(plan.amount > 0) || !/^\d{4}-\d{2}$/.test(plan.startMonth || '')) throw userError('اكتب مبلغ وأول شهر صحيحين.', 'Enter a valid amount and first month.');
+    const changes = [
+      plan.amount !== r.amount ? L(`المبلغ من ${r.amount} لـ ${plan.amount}`, `amount ${r.amount} → ${plan.amount}`) : '',
+      plan.installments !== r.installments ? L(`الأقساط من ${r.installments} لـ ${plan.installments}`, `installments ${r.installments} → ${plan.installments}`) : '',
+      plan.startMonth !== r.startMonth ? L(`أول شهر من ${r.startMonth || '—'} لـ ${plan.startMonth}`, `first month ${r.startMonth || '—'} → ${plan.startMonth}`) : ''
+    ].filter(Boolean);
+    if (changes.length) {
+      await updateDoc(doc(db, 'requests', id), { ...plan, updatedAt: serverTimestamp(), history: arrayUnion({ at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: 'edited', note: changes.join(' · ') }) });
+      r = { ...r, ...plan };
+    }
+  }
   const stage = r.status.replace('pending_', '');
   const entry = { at: now(), by: session.email, byName: (session.profile || {}).name || session.email, action: action === 'approve' ? `approved_${stage}` : `rejected_${stage}`, note };
   track(action === 'approve' ? 'request.approve' : 'request.reject', { target: r.email, detail: `${typeLabel(r.type)} — ${r.name || r.email}` });
@@ -307,9 +334,10 @@ export async function applyApproval(id, entry) {
       }
     }
     if (r.type === 'advance') {
+      const plan = advancePlan(r.amount, r.installments, r.startMonth || ymd(now()).slice(0, 7));
       tx.set(doc(db, 'advances', id), {
-        email, name: r.name, amount: r.amount, installments: r.installments, perMonth: Math.round((r.amount / r.installments) * 100) / 100,
-        startMonth: r.startMonth || ymd(now()).slice(0, 7), paid: 0, status: 'active', createdAt: serverTimestamp()
+        email, name: r.name, amount: plan.amount, installments: plan.installments, perMonth: plan.perMonth,
+        startMonth: plan.startMonth, endMonth: plan.endMonth, paid: 0, status: 'active', createdAt: serverTimestamp()
       });
     }
     const upd = { status: 'approved', updatedAt: serverTimestamp(), approvedBy: session.email, approvedAt: serverTimestamp() };
@@ -333,7 +361,9 @@ export async function applyApproval(id, entry) {
       mode: c.mode || undefined, note: L('طلب تصحيح معتمد', 'Approved correction request') + (r0.reason ? ` — ${r0.reason}` : '')
     });
   }
-  notify(email, L(`تم اعتماد طلبك: ${typeLabel(r0.type)}`, `Request approved: ${typeLabel(r0.type)}`), r0.startDate || '', '#/requests', 'approved');
+  const fin = r0.type === 'advance' ? await read('requests', id).catch(() => r0) : r0;
+  const body = r0.type === 'advance' ? L(`${fin.amount} ج.م على ${fin.installments} قسط (${fin.perMonth} شهرياً) من ${fin.startMonth} لـ ${fin.endMonth}`, `${fin.amount} EGP in ${fin.installments} installments (${fin.perMonth}/month), ${fin.startMonth} → ${fin.endMonth}`) : (r0.startDate || '');
+  notify(email, L(`تم اعتماد طلبك: ${typeLabel(r0.type)}`, `Request approved: ${typeLabel(r0.type)}`), body, '#/requests', 'approved');
 }
 
 /** HR: revoke an approved leave/remote/mission (returns balance, clears schedule) */

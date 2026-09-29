@@ -43,9 +43,11 @@ service cloud.firestore {
     function wfList(t) { return exists(settingsPath()) ? get(settingsPath()).data.get('workflow', {}).get(t, defaultWf(t)) : defaultWf(t); }
     // the first approval stage the requester must go through
     function firstStatusOk(d) {
-      return (prof().get('leaderEmail', '') != '' && wfList(d.type).hasAny(['leader']))
-        ? d.status == 'pending_leader'
-        : d.status in (d.type == 'advance' ? ['pending_hr', 'pending_finance'] : ['pending_hr']);
+      // salary advances go to the admin only
+      return d.type == 'advance' ? d.status == 'pending_admin'
+        : ((prof().get('leaderEmail', '') != '' && wfList(d.type).hasAny(['leader']))
+          ? d.status == 'pending_leader'
+          : d.status == 'pending_hr');
     }
     // a check-in must happen on the work day it is filed under (Cairo day, generous window)
     function dayWindowOk(d) {
@@ -232,7 +234,7 @@ service cloud.firestore {
       allow create: if (isHR() && othersOnly()) || (active()
         && request.resource.data.email == me()
         && request.resource.data.get('leaderEmail', '') == prof().get('leaderEmail', '')
-        && request.resource.data.type in ['leave', 'remote', 'excuse', 'mission', 'correction', 'advance', 'letter']
+        && request.resource.data.type in ['leave', 'remote', 'excuse', 'correction', 'advance', 'letter']
         && firstStatusOk(request.resource.data));
       // requester cancels while pending
       allow update: if active() && resource.data.email == me() && resource.data.status.matches('pending_.*')

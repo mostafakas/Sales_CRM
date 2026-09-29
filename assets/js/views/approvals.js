@@ -1,9 +1,9 @@
 // Approvals inbox (manager / HR / finance) + decided history.
-import { L, esc, num, addDays, ymd } from '../core/utils.js';
-import { toast, toastErr, confirmDialog, empty, bindActions, busy } from '../core/ui.js';
+import { L, esc, num, addDays, ymd, money, fmtMonth } from '../core/utils.js';
+import { toast, toastErr, confirmDialog, empty, bindActions, busy, modal } from '../core/ui.js';
 import { session, now, isHR, isAdmin } from '../core/session.js';
 import { REQUEST_TYPES, typeLabel } from '../core/policy.js';
-import { watchInbox, watchManaged, decide, revokeRequest, setResponse, getBalance, remaining } from '../services/requests.js';
+import { watchInbox, watchManaged, decide, revokeRequest, setResponse, getBalance, remaining, advancePlan } from '../services/requests.js';
 import { requestCard, showRequestDetails, requestTitle } from './request-card.js';
 import { play } from '../core/sounds.js';
 
@@ -56,10 +56,40 @@ export default async function render(root) {
     }
   }
   const find = (id) => inbox.find(r => r.id === id) || history.find(r => r.id === id);
+  /** Admin: review a salary advance — amount, installments and first month can be changed before approving */
+  function approveAdvance(r) {
+    const m = modal({
+      title: `${L('اعتماد سلفة', 'Approve advance')} — ${r.name}`, icon: 'fa-hand-holding-dollar', size: 'narrow',
+      body: `<form class="form-grid" id="af">
+          <div class="field span-2"><label>${L('المبلغ (ج.م)', 'Amount (EGP)')}</label><input class="input num" type="number" min="1" step="1" name="amount" value="${esc(r.amount)}"></div>
+          <div class="field"><label>${L('عدد الأقساط', 'Installments')}</label><input class="input num" type="number" min="1" max="24" name="installments" value="${esc(r.installments)}"></div>
+          <div class="field"><label>${L('أول شهر خصم', 'First month')}</label><input class="input" type="month" name="startMonth" value="${esc(r.startMonth || '')}"></div>
+          <div class="span-2 alert info" id="ap"></div>
+          ${r.reason ? `<div class="span-2"><div class="label mb-8">${L('السبب', 'Reason')}</div><div class="reason">${esc(r.reason)}</div></div>` : ''}
+        </form><p class="xs muted mt-8">${L('لو غيّرت حاجة، التعديل بيتسجل في تاريخ الطلب والموظف بيوصله إشعار بالقيم النهائية.', 'Any change is recorded in the request history and the employee is notified of the final values.')}</p>`,
+      foot: `<button class="btn" data-close>${L('إلغاء', 'Cancel')}</button><button class="btn btn-ok" id="aok"><i class="fas fa-check"></i> ${L('اعتماد', 'Approve')}</button>`
+    });
+    const f = m.$('#af');
+    const read_ = () => ({ amount: Number(f.amount.value), installments: Math.max(1, Math.min(24, Number(f.installments.value) || 1)), startMonth: f.startMonth.value });
+    const draw = () => {
+      const v = read_();
+      const p = advancePlan(v.amount, v.installments, v.startMonth);
+      m.$('#ap').innerHTML = v.amount > 0 && v.startMonth
+        ? `<i class="fas fa-calendar-check"></i><span>${L('القسط الشهري:', 'Monthly installment:')} <b class="num">${esc(money(p.perMonth))}</b> · ${esc(fmtMonth(p.startMonth))} ← ${esc(fmtMonth(p.endMonth))}</span>`
+        : `<i class="fas fa-circle-info"></i><span>${L('اكتب المبلغ وأول شهر.', 'Enter the amount and first month.')}</span>`;
+    };
+    f.addEventListener('input', draw); draw();
+    m.$('#aok').onclick = (e) => busy(e.currentTarget, async () => {
+      const v = read_();
+      if (!(v.amount > 0) || !v.startMonth) { f.amount.focus(); return; }
+      try { await decide(r.id, 'approve', '', v); play('approved'); m.close(); toast(L('تم اعتماد السلفة', 'Advance approved'), `${r.name} — ${money(v.amount)}`); } catch (ex) { toastErr(ex); }
+    });
+  }
   bindActions(root, {
     details: ({ id }) => { const r = find(id); if (r) showRequestDetails(r); },
     approve: async ({ id }, btn) => {
       const r = find(id); if (!r) return;
+      if (r.type === 'advance' && r.status === 'pending_admin') { approveAdvance(r); return; }
       let note = '';
       if (r.type === 'letter' && r.status === 'pending_hr') {
         note = await confirmDialog({ title: L('اعتماد الخطاب', 'Approve letter'), message: L('اكتب رد للموظف (مثلاً: الخطاب جاهز للاستلام من HR).', 'Write a response to the employee (e.g. the letter is ready for pickup).'), okText: L('اعتماد', 'Approve'), okClass: 'btn-ok', input: { label: L('الرد', 'Response'), required: true } });

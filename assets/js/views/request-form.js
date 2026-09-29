@@ -1,14 +1,14 @@
 // New-request dialog shared by "My day" and "My requests".
-import { L, esc, ymd, addDays, imageToDataUrl, addMonths } from '../core/utils.js';
+import { L, esc, ymd, addDays, imageToDataUrl, addMonths, money, fmtMonth } from '../core/utils.js';
 import { modal, toast, toastErr, busy } from '../core/ui.js';
-import { REQUEST_TYPES, leaveTypes, policy, typeLabel, hoursFor } from '../core/policy.js';
+import { REQUEST_TYPES, leaveTypes, policy, typeLabel, hoursFor, activeRequestTypes } from '../core/policy.js';
 import { session, now } from '../core/session.js';
-import { submitRequest, getBalance, remaining, countWorkingDays } from '../services/requests.js';
+import { submitRequest, getBalance, remaining, countWorkingDays, advancePlan } from '../services/requests.js';
 import { play } from '../core/sounds.js';
 
 export function openRequestForm(type = 'leave', preset = {}) {
   const today = ymd(now());
-  const typeOpts = Object.keys(REQUEST_TYPES).map(k => `<option value="${k}" ${k === type ? 'selected' : ''}>${esc(typeLabel(k))}</option>`).join('');
+  const typeOpts = activeRequestTypes().map(k => `<option value="${k}" ${k === type ? 'selected' : ''}>${esc(typeLabel(k))}</option>`).join('');
   const m = modal({
     title: L('طلب جديد', 'New request'), icon: 'fa-paper-plane', size: '',
     body: `<form id="rq" class="col gap-16" novalidate>
@@ -51,6 +51,11 @@ export function openRequestForm(type = 'leave', preset = {}) {
       } else if (t === 'excuse') {
         info.innerHTML = `<i class="fas fa-circle-info"></i><span>${L('الحد الشهري للأذونات:', 'Monthly permission limit:')} <b class="num">${policy.excuseHoursPerMonth}</b> ${L('ساعات', 'hours')}</span>`;
         info.className = 'alert info';
+      } else if (t === 'advance' && Number(form.amount.value) > 0 && form.startMonth.value) {
+        // the plan, live: monthly installment and the last month it is deducted
+        const p = advancePlan(Number(form.amount.value), Math.min(24, Number(form.installments.value) || 1), form.startMonth.value);
+        info.innerHTML = `<i class="fas fa-calendar-check"></i><span>${L('القسط الشهري:', 'Monthly installment:')} <b class="num">${esc(money(p.perMonth))}</b> · ${L('من', 'from')} <b>${esc(fmtMonth(p.startMonth))}</b> ${L('لحد', 'to')} <b>${esc(fmtMonth(p.endMonth))}</b></span>`;
+        info.className = 'alert info';
       }
     } catch (e) { console.warn(e); }
   }
@@ -85,7 +90,8 @@ export function openRequestForm(type = 'leave', preset = {}) {
       h += `<div class="form-grid">
         <div class="field"><label>${L('المبلغ (ج.م)', 'Amount (EGP)')}</label><input class="input num" type="number" min="1" step="1" name="amount"></div>
         <div class="field"><label>${L('عدد الأقساط الشهرية', 'Monthly installments')}</label><input class="input num" type="number" min="1" max="24" name="installments" value="1"></div>
-        <div class="field span-2"><label>${L('يبدأ الخصم من شهر', 'Deduct starting')}</label><input class="input" type="month" name="startMonth" value="${addMonths(today.slice(0, 7), 1)}"></div></div>`;
+        <div class="field span-2"><label>${L('أول شهر خصم من المرتب', 'First month deducted from salary')}</label><input class="input" type="month" name="startMonth" min="${today.slice(0, 7)}" value="${addMonths(today.slice(0, 7), 1)}"></div></div>
+        <p class="xs muted">${L('الطلب بيروح للأدمن، وبعد الموافقة القسط بيتخصم من مرتبك كل شهر لوحده وبيظهر في قسيمة الراتب.', 'The request goes to the admin; once approved, the installment is deducted from your salary every month and shown on your payslip.')}</p>`;
     } else if (t === 'letter') {
       h += `<div class="form-grid">
         <div class="field"><label>${L('نوع الخطاب', 'Letter type')}</label><select class="select" name="letterKind"><option value="employment">${L('إثبات عمل', 'Employment letter')}</option><option value="salary">${L('شهادة مرتب', 'Salary certificate')}</option><option value="experience">${L('شهادة خبرة', 'Experience letter')}</option><option value="other">${L('أخرى', 'Other')}</option></select></div>
@@ -100,7 +106,7 @@ export function openRequestForm(type = 'leave', preset = {}) {
         fields.querySelector('#rq-file').textContent = file.files[0].name;
       } catch { toast(L('الملف لازم يكون صورة وحجمها معقول', 'Attachment must be a reasonably sized image'), '', 'bad'); }
     };
-    fields.querySelectorAll('input,select').forEach(el => el.addEventListener('change', refreshInfo));
+    fields.querySelectorAll('input,select').forEach(el => { el.addEventListener('change', refreshInfo); if (t === 'advance') el.addEventListener('input', refreshInfo); }); // typing only recalculates the advance plan (no reads)
     refreshInfo();
   }
   form.type.onchange = renderFields;

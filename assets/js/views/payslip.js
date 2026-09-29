@@ -59,8 +59,9 @@ export function payslipHTML(i) {
   const advSub = (() => {
     const r = (i.advanceRefs || [])[0];
     if (!r || !r.total) return '';
-    const per = r.amount || 1, idx = Math.round((r.paidBefore || 0) / per) + 1, left = Math.max(0, r.total - (r.paidBefore || 0) - r.amount);
-    return L(`قسط ${idx}${r.count ? ` من ${r.count}` : ''} — المتبقي بعده ${money(left, false)}`, `Installment ${idx}${r.count ? ` of ${r.count}` : ''} — ${money(left, false)} left after it`);
+    const per = r.perMonth || r.amount || 1, idx = Math.round((r.paidBefore || 0) / per) + 1, left = Math.max(0, r.total - (r.paidBefore || 0) - r.amount);
+    const months = r.startMonth ? ` (${fmtMonth(r.startMonth)}${r.endMonth && r.endMonth !== r.startMonth ? ` ← ${fmtMonth(r.endMonth)}` : ''})` : '';
+    return L(`قسط ${idx}${r.count ? ` من ${r.count}` : ''}${months} — سلفة ${money(r.total, false)}، المتبقي بعده ${money(left, false)}`, `Installment ${idx}${r.count ? ` of ${r.count}` : ''}${months} — advance ${money(r.total, false)}, ${money(left, false)} left after it`);
   })();
   const deds = [
     ...(i.fixed ? [[L('خصومات ثابتة (تأمينات...)', 'Fixed deductions (insurance…)'), i.fixed, '']] : []),

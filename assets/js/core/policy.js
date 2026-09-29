@@ -52,7 +52,7 @@ export const REQUEST_TYPES = {
   leave:      { ar: 'إجازة', en: 'Leave', icon: 'fa-umbrella-beach', tile: 'warn' },
   remote:     { ar: 'عمل أونلاين', en: 'Remote work', icon: 'fa-house-laptop', tile: '' },
   excuse:     { ar: 'إذن تأخير / انصراف', en: 'Late / early permission', icon: 'fa-clock', tile: 'info' },
-  mission:    { ar: 'مأمورية', en: 'Business mission', icon: 'fa-briefcase', tile: 'ok' },
+  mission:    { ar: 'مأمورية', en: 'Business mission', icon: 'fa-briefcase', tile: 'ok', retired: true }, // no longer requested; kept to show old records
   correction: { ar: 'تصحيح حضور', en: 'Attendance correction', icon: 'fa-pen-to-square', tile: 'neutral' },
   advance:    { ar: 'سلفة', en: 'Salary advance', icon: 'fa-hand-holding-dollar', tile: 'ok' },
   letter:     { ar: 'خطاب من HR', en: 'HR letter', icon: 'fa-file-signature', tile: 'info' }
@@ -61,6 +61,7 @@ export const REQUEST_STATUS = {
   pending_leader:  { ar: 'عند المدير المباشر', en: 'With manager', cls: 'warn' },
   pending_hr:      { ar: 'عند HR', en: 'With HR', cls: 'warn' },
   pending_finance: { ar: 'عند المالية', en: 'With finance', cls: 'warn' },
+  pending_admin:   { ar: 'عند الأدمن', en: 'With admin', cls: 'warn' },
   approved:        { ar: 'معتمد', en: 'Approved', cls: 'ok' },
   rejected:        { ar: 'مرفوض', en: 'Rejected', cls: 'bad' },
   cancelled:       { ar: 'ملغي', en: 'Cancelled', cls: '' }
@@ -182,7 +183,10 @@ export function lateDeductionDays(lateMin) {
   return d;
 }
 /** Which approval stages a request of this type goes through for this requester */
+/** Request types people can still file (retired ones only appear on old records) */
+export const activeRequestTypes = () => Object.keys(REQUEST_TYPES).filter(k => !REQUEST_TYPES[k].retired);
 export function stagesFor(type, requester) {
+  if (type === 'advance') return ['admin']; // salary advances are decided by the admin only
   const wf = (policy.workflow && policy.workflow[type]) || ['hr'];
   const st = wf.filter(s => !(s === 'leader' && !(requester && requester.leaderEmail)));
   return st.length ? st : ['hr']; // nobody approves their own request

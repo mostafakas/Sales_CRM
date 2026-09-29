@@ -3,7 +3,7 @@ import { L, esc, num, fmtDate, isAr, fmtTime } from '../core/utils.js';
 import { publicConfig, savePublicConfig, callService, siteUrl } from '../services/authsvc.js';
 import { toast, toastErr, busy, confirmDialog, empty, loader, modal } from '../core/ui.js';
 import { isAdmin, session, now } from '../core/session.js';
-import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY } from '../core/policy.js';
+import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY, activeRequestTypes } from '../core/policy.js';
 import { list, query, col, orderBy, limit, read, toMs, serverTimestamp } from '../core/fb.js';
 import { migrate } from '../services/migration.js';
 
@@ -97,14 +97,14 @@ export default async function render(root) {
     flow() {
       const stages = [['leader', L('المدير المباشر', 'Manager')], ['hr', 'HR'], ['finance', L('المالية', 'Finance')]];
       pane.innerHTML = `<div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>${L('نوع الطلب', 'Request type')}</th>${stages.map(s => `<th>${esc(s[1])}</th>`).join('')}</tr></thead><tbody>
-        ${Object.keys(REQUEST_TYPES).map(t => `<tr data-t="${t}"><td><b>${esc(typeLabel(t))}</b></td>${stages.map(([s]) => { const locked = s === 'hr' && ['leave', 'correction'].includes(t); return `<td><label class="switch" ${locked ? `title="${L('إلزامي: HR بس اللي يقدر يعدّل الأرصدة والحضور', 'Required: only HR can change balances and attendance')}"` : ''}><input type="checkbox" data-s="${s}" ${locked || ((policy.workflow || {})[t] || []).includes(s) ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label></td>`; }).join('')}</tr>`).join('')}
+        ${activeRequestTypes().filter(t => t !== 'advance').map(t => `<tr data-t="${t}"><td><b>${esc(typeLabel(t))}</b></td>${stages.map(([s]) => { const locked = s === 'hr' && ['leave', 'correction'].includes(t); return `<td><label class="switch" ${locked ? `title="${L('إلزامي: HR بس اللي يقدر يعدّل الأرصدة والحضور', 'Required: only HR can change balances and attendance')}"` : ''}><input type="checkbox" data-s="${s}" ${locked || ((policy.workflow || {})[t] || []).includes(s) ? 'checked' : ''} ${locked ? 'disabled' : ''}><span></span></label></td>`; }).join('')}</tr>`).join('')}
+        <tr><td><b>${esc(typeLabel('advance'))}</b></td><td colspan="${stages.length}"><span class="badge brand"><i class="fas fa-lock"></i>${L('الأدمن بس', 'Admin only')}</span></td></tr>
         </tbody></table></div><div class="card-body"><p class="xs muted">${L('الطلب بيعدّي على المراحل بالترتيب ده. لو الموظف ملوش مدير مباشر، مرحلة المدير بتتخطى. لو مفيش ولا مرحلة، الطلب بيروح لـ HR.', 'Requests pass the checked stages in this order. Without a manager, the manager stage is skipped. With no stages, HR decides.')}</p></div>${saveBar()}</div>`;
       pane.querySelector('#save').onclick = (e) => busy(e.currentTarget, async () => {
         const wf = {};
         pane.querySelectorAll('tr[data-t]').forEach(tr => {
           const t = tr.dataset.t;
           const st = stages.map(s => s[0]).filter(s => tr.querySelector(`[data-s="${s}"]`).checked);
-          if (t === 'advance' && !st.includes('hr') && !st.includes('finance')) st.push('finance');
           wf[t] = st;
         });
         try { await savePolicy({ workflow: wf }); toast(L('تم الحفظ', 'Saved')); } catch (ex) { toastErr(ex); }

@@ -161,7 +161,7 @@ export default async function render(root) {
   function renderQuick() {
     const q = [
       ['leave', 'fa-umbrella-beach', 'warn'], ['remote', 'fa-house-laptop', ''], ['excuse', 'fa-clock', 'info'],
-      ['mission', 'fa-briefcase', 'ok'], ['correction', 'fa-pen-to-square', 'neutral'], ['letter', 'fa-file-signature', 'info']
+      ['advance', 'fa-hand-holding-dollar', 'ok'], ['correction', 'fa-pen-to-square', 'neutral'], ['letter', 'fa-file-signature', 'info']
     ];
     root.querySelector('#quick').innerHTML = `<div class="card-head"><h3>${L('طلب سريع', 'Quick request')}</h3></div>
       <div class="card-body"><div class="grid g-3 keep-2" style="gap:10px">${q.map(([t, i, c]) => `

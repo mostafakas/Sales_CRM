@@ -1,4 +1,4 @@
-// Weekly roster: office / remote / off / mission per person per day, with custom hours.
+// Weekly roster: office / remote / off per person per day, with custom hours.
 import { L, esc, ymd, addDays, weekday, fmtDate, isAr, debounce } from '../core/utils.js';
 import { toast, toastErr, modal, avatar, empty, busy, loader } from '../core/ui.js';
 import { now, isHR, session } from '../core/session.js';
@@ -14,12 +14,12 @@ export default async function render(root) {
   let start = weekStart(dayKey(now())), term = '', dept = '';
   let schedules = [];
   root.innerHTML = `
-    <div class="page-head"><div><h2>${L('جداول العمل', 'Work schedules')}</h2><p>${L('خطة كل موظف: مكتب، أونلاين، راحة أو مأمورية. الإجازات بتتضاف تلقائياً من الطلبات المعتمدة.', 'Each person\'s plan: office, remote, off or mission. Leave is added automatically from approved requests.')}</p></div>
+    <div class="page-head"><div><h2>${L('جداول العمل', 'Work schedules')}</h2><p>${L('خطة كل موظف: مكتب، أونلاين أو راحة. الإجازات بتتضاف تلقائياً من الطلبات المعتمدة.', 'Each person\'s plan: office, remote or off. Leave is added automatically from approved requests.')}</p></div>
       <div class="row gap-8"><button class="btn btn-icon" data-w="-7"><i class="fas fa-chevron-right" data-flip></i></button><b id="wl" style="min-width:190px;text-align:center"></b><button class="btn btn-icon" data-w="7"><i class="fas fa-chevron-left" data-flip></i></button><button class="btn btn-sm" id="this">${L('الأسبوع ده', 'This week')}</button></div></div>
     <div class="filters">
       <div class="search grow" style="max-width:260px"><i class="fas fa-search"></i><input class="input" id="q" placeholder="${L('بحث', 'Search')}"></div>
       ${isHR() ? `<select class="select" id="dept"><option value="">${L('كل الأقسام', 'All departments')}</option>${departments().map(d => `<option>${esc(d)}</option>`).join('')}</select>` : ''}
-      <div class="row-wrap gap-4">${['office', 'remote', 'leave', 'mission', 'off', 'holiday'].map(k => `<span class="chip ${MODE_META[k].cls}">${esc(modeLabel(k))}</span>`).join('')}</div>
+      <div class="row-wrap gap-4">${['office', 'remote', 'leave', 'off', 'holiday'].map(k => `<span class="chip ${MODE_META[k].cls}">${esc(modeLabel(k))}</span>`).join('')}</div>
     </div>
     <div class="card"><div class="table-wrap"><table class="table roster"><thead id="th"></thead><tbody id="tb"><tr><td>${loader()}</td></tr></tbody></table></div></div>`;
   async function load() {
@@ -56,7 +56,7 @@ export default async function render(root) {
     const m = modal({
       title: `${p ? p.name : email} — ${fmtDate(date)}`, icon: 'fa-calendar-day', size: 'narrow',
       body: `<form class="form-grid" id="sf">
-        <div class="field span-2"><label>${L('الخطة', 'Plan')}</label><select class="select" name="mode">${['office', 'remote', 'mission', 'off'].map(k => `<option value="${k}" ${pl.mode === k ? 'selected' : ''}>${esc(modeLabel(k))}</option>`).join('')}</select></div>
+        <div class="field span-2"><label>${L('الخطة', 'Plan')}</label><select class="select" name="mode">${['office', 'remote', 'off'].map(k => `<option value="${k}" ${pl.mode === k ? 'selected' : ''}>${esc(modeLabel(k))}</option>`).join('')}</select></div>
         <div class="field"><label>${L('من', 'From')}</label><input class="input" type="time" name="start" value="${esc(pl.start || policy.workStart)}"></div>
         <div class="field"><label>${L('إلى', 'To')}</label><input class="input" type="time" name="end" value="${esc(pl.end || policy.workEnd)}"></div>
         <label class="check span-2"><input type="checkbox" name="all"> ${L('طبّق على كل أيام العمل في الأسبوع ده', 'Apply to all working days this week')}</label></form>`,

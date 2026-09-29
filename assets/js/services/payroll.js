@@ -73,7 +73,7 @@ export function computeItem({ person: p, priv, totals, violations = [], advances
     lateDays: violations.filter(v => v.kind === 'late').length, lateMinutes: totals ? totals.lateMinutes : 0, presentDays: totals ? totals.present : 0,
     advance: r2(advance),
     // enough about each advance to explain the installment on the payslip ("installment 2 of 5 — 6,000 left")
-    advanceRefs: advances.map(a => ({ id: a.id, amount: a.installment, total: Number(a.amount) || 0, paidBefore: Number(a.paid) || 0, count: Number(a.installments) || 0 })),
+    advanceRefs: advances.map(a => ({ id: a.id, amount: a.installment, total: Number(a.amount) || 0, paidBefore: Number(a.paid) || 0, count: Number(a.installments) || 0, perMonth: Number(a.perMonth) || a.installment, startMonth: a.startMonth || '', endMonth: a.endMonth || '' })),
     otherDeductions: manual.otherDeductions || [], note: manual.note || '',
     gross, deductions, net: r2(gross - deductions), dayRate: r2(parts.basic / divisor),
     att: totals ? {
@@ -89,7 +89,9 @@ async function activeAdvances(month) {
   const all = await list(query(col('advances'), where('status', '==', 'active'))).catch(() => []);
   return all.filter(a => (a.startMonth || '') <= month).map(a => {
     const left = r2((Number(a.amount) || 0) - (Number(a.paid) || 0));
-    return { ...a, installment: r2(Math.min(left, Number(a.perMonth) || left)) };
+    const per = Number(a.perMonth) || left;
+    // the last installment takes the rounding remainder (1,000 in 3 → 333.33, 333.33, 333.34)
+    return { ...a, installment: r2(left - per < 1 ? left : per) };
   }).filter(a => a.installment > 0);
 }
 
@@ -128,7 +130,7 @@ export async function saveManual(month, email, manual) {
   const p = person(email) || { email, name: it.name };
   const priv = await read('employees_private', email).catch(() => ({})) || {};
   const totals = it.att || null; // attendance numbers captured when the run was built
-  const advances = (it.advanceRefs || []).map(a => ({ id: a.id, installment: a.amount, amount: a.total, paid: a.paidBefore, installments: a.count }));
+  const advances = (it.advanceRefs || []).map(a => ({ id: a.id, installment: a.amount, amount: a.total, paid: a.paidBefore, installments: a.count, perMonth: a.perMonth, startMonth: a.startMonth, endMonth: a.endMonth }));
   const next = computeItem({ person: p, priv, totals, violations: (it.att && it.att.violations) || [], advances, manual });
   await updateDoc(doc(db, 'payroll_items', itemId(month, email)), { ...next, updatedAt: serverTimestamp(), editedBy: session.email });
 }

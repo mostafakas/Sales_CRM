@@ -26,7 +26,7 @@ export default async function render(root) {
     <div class="filters">
       <div class="search grow" style="max-width:280px"><i class="fas fa-search"></i><input class="input" id="q" placeholder="${L('بحث', 'Search')}"></div>
       <select class="select" id="dept"><option value="">${L('كل الأقسام', 'All departments')}</option>${departments().map(d => `<option>${esc(d)}</option>`).join('')}</select>
-      <select class="select" id="sf"><option value="">${L('كل الحالات', 'All statuses')}</option>${['present', 'remote', 'absent', 'leave', 'mission', 'off', 'holiday', 'today'].map(k => `<option value="${k}">${esc(L(STATUS_DAY[k].ar, STATUS_DAY[k].en))}</option>`).join('')}<option value="late">${L('متأخر', 'Late')}</option></select>
+      <select class="select" id="sf"><option value="">${L('كل الحالات', 'All statuses')}</option>${['present', 'remote', 'absent', 'leave', 'off', 'holiday', 'today'].map(k => `<option value="${k}">${esc(L(STATUS_DAY[k].ar, STATUS_DAY[k].en))}</option>`).join('')}<option value="late">${L('متأخر', 'Late')}</option></select>
     </div>
     <div class="card"><div class="table-wrap"><table class="table"><thead><tr>
       <th>${L('الموظف', 'Employee')}</th><th>${L('الخطة', 'Plan')}</th><th>${L('الحالة', 'Status')}</th><th>${L('حضور', 'In')}</th><th>${L('انصراف', 'Out')}</th><th>${L('تأخير', 'Late')}</th><th>${L('ساعات', 'Hours')}</th><th></th>
@@ -93,7 +93,7 @@ export default async function render(root) {
         title: `${L('تصحيح حضور', 'Correct attendance')} — ${it.p.name}`, icon: 'fa-pen-to-square', size: 'narrow',
         body: `<form class="form-grid" id="cf">
           <div class="field span-2"><label>${L('الحالة', 'Status')}</label><select class="select" name="status">
-            <option value="">${L('حسب التسجيل', 'From records')}</option><option value="present">${L('حاضر', 'Present')}</option><option value="absent">${L('غياب', 'Absent')}</option><option value="leave">${L('إجازة', 'Leave')}</option><option value="mission">${L('مأمورية', 'Mission')}</option></select></div>
+            <option value="">${L('حسب التسجيل', 'From records')}</option><option value="present">${L('حاضر', 'Present')}</option><option value="absent">${L('غياب', 'Absent')}</option><option value="leave">${L('إجازة', 'Leave')}</option></select></div>
           <div class="field"><label>${L('حضور', 'Check-in')}</label><input class="input" type="time" name="in" value="${esc(hm(rec.checkInMs))}"></div>
           <div class="field"><label>${L('انصراف', 'Check-out')}</label><input class="input" type="time" name="out" value="${esc(hm(rec.checkOutMs))}"></div>
           <div class="field span-2"><label>${L('المكان', 'Location')}</label><select class="select" name="mode"><option value="">—</option><option value="office" ${rec.mode === 'office' ? 'selected' : ''}>${L('المكتب', 'Office')}</option><option value="remote" ${rec.mode === 'remote' ? 'selected' : ''}>${L('أونلاين', 'Remote')}</option></select></div>
