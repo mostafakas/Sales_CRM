@@ -60,7 +60,7 @@ export default async function render(root) {
           </div>
         </div>
         <div class="hero-timer">
-          <div class="muted small">${L('وقت الشغل النهارده', 'Work time today')}</div>
+          <div class="muted small" title="${L('العمل + الاجتماعات، من غير الاستراحة', 'Work + meetings, breaks excluded')}">${L('وقت الشغل النهارده', 'Work time today')}</div>
           <div class="timer-big" id="t-main">00:00:00</div>
           <div class="muted small mt-8">${esc(L('الخطة:', 'Plan:'))} ${esc(modeLabel(plan.mode))}${plan.start ? ` · ${esc(plan.start)}–${esc(plan.end)}` : ''}</div>
         </div>
@@ -203,7 +203,7 @@ export default async function render(root) {
   function tick() {
     const p = u();
     const bank = p.dayKey === today() ? liveBank(p) : { Online: 0, Break: 0, Meeting: 0 };
-    const main = root.querySelector('#t-main'); if (main) main.textContent = fmtDur(bank.Online);
+    const main = root.querySelector('#t-main'); if (main) main.textContent = fmtDur(bank.Online + bank.Meeting); // work + meetings, breaks excluded
     root.querySelectorAll('[data-timer]').forEach(el => { el.textContent = fmtDur(bank[el.dataset.timer]); });
     const bw = root.querySelector('#break-warn');
     if (bw) bw.classList.toggle('hidden', !(bank.Break > (policy.breakMaxMinutes || 0) * 60000 && policy.breakMaxMinutes));

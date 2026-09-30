@@ -21,9 +21,10 @@ const STATES = {
 const ORDER = Object.keys(STATES);
 const FROM_STATUS = { Online: 'working', Break: 'break', Meeting: 'meeting' };
 const VIEW_KEY = 'am_monitor_view';
-const SEGS = ['Online', 'Meeting', 'Break'];
-const bankTotal = (b) => (b.Online || 0) + (b.Break || 0) + (b.Meeting || 0);
-/** width % of each status in the day bar; past the planned hours the bar is full and keeps the proportions */
+// the headline time is work + meetings (breaks are shown on their own row and are not part of it)
+const SEGS = ['Online', 'Meeting'];
+const bankTotal = (b) => (b.Online || 0) + (b.Meeting || 0);
+/** width % of work and meetings in the day bar; past the planned hours the bar is full and keeps the proportions */
 const segWidths = (b, target) => { const d = Math.max(target || 1, bankTotal(b)); return SEGS.map(k => ((b[k] || 0) / d * 100).toFixed(2)); };
 const planMs = (p) => (p && p.start && p.end ? Math.max(0, hmToMin(p.end) - hmToMin(p.start)) * 60000 : 8 * 3600000);
 
@@ -152,15 +153,14 @@ export default async function render(root) {
     if (!(i.on || i.state === 'ended')) return '<span class="faint">—</span>';
     return `<span class="loc ${i.remote ? 'remote' : ''}"><i class="fas ${i.remote ? 'fa-house-laptop' : 'fa-building'}"></i>${esc(modeLabel(u.workLocation || 'office'))}</span>`;
   };
-  // the day bar: working / meeting / break side by side, each in its own colour, against the planned hours
+  // the day bar: work and meetings side by side, each in its own colour, against the planned hours
   const progress = (u, i) => {
     const w = segWidths(i.bank, i.target);
-    return `<div class="mon-work"><div class="row between"><b class="num" data-live="${esc(u.email)}|Total" title="${L('إجمالي اليوم', 'Total today')}">${fmtDur(bankTotal(i.bank))}</b><small class="faint num">${esc(fmtHours(i.target))}</small></div>
+    return `<div class="mon-work"><div class="row between"><b class="num" data-live="${esc(u.email)}|Total" title="${L('العمل + الاجتماعات', 'Work + meetings')}">${fmtDur(bankTotal(i.bank))}</b><small class="faint num">${esc(fmtHours(i.target))}</small></div>
       <div class="progress stack">${SEGS.map((k, n) => `<span data-seg="${esc(u.email)}|${k}" style="width:${w[n]}%;background:${STATUS_META[k].color}" title="${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}"></span>`).join('')}</div></div>`;
   };
-  const subTimes = (u, i) => `<span title="${L('شغل', 'Working')}"><i class="fas fa-laptop-code" style="color:var(--ok)"></i><span data-live="${esc(u.email)}|Online">${fmtDur(i.bank.Online)}</span></span>`
-    + `<span title="${L('استراحة', 'Break')}"><i class="fas fa-mug-hot" style="color:var(--warn)"></i><span data-live="${esc(u.email)}|Break">${fmtDur(i.bank.Break)}</span></span>`
-    + `<span title="${L('اجتماع', 'Meeting')}"><i class="fas fa-users" style="color:var(--info)"></i><span data-live="${esc(u.email)}|Meeting">${fmtDur(i.bank.Meeting)}</span></span>`;
+  // the break, alone on its own row
+  const subTimes = (u, i) => `<span title="${L('استراحة', 'Break')}"><i class="fas fa-mug-hot" style="color:var(--warn)"></i>${L('استراحة', 'Break')} <span data-live="${esc(u.email)}|Break">${fmtDur(i.bank.Break)}</span></span>`;
   const actions = (u) => `<div class="row gap-4 mon-actions">
       <button class="btn btn-sm btn-ghost btn-icon" data-action="history" data-email="${esc(u.email)}" title="${L('سجل النهارده', "Today's log")}" aria-label="${L('سجل النهارده', "Today's log")}"><i class="fas fa-clock-rotate-left"></i></button>
       ${canManage(u) ? `<button class="btn btn-sm btn-ghost btn-icon" data-action="manage" data-email="${esc(u.email)}" title="${L('إدارة', 'Manage')}" aria-label="${L('إدارة', 'Manage')}"><i class="fas fa-ellipsis-vertical"></i></button>` : ''}
@@ -171,7 +171,7 @@ export default async function render(root) {
   function tableHTML(rows, infos) {
     return `<div class="card"><div class="table-wrap"><table class="table mon-table"><thead><tr>
         <th>${L('الموظف', 'Employee')}</th><th>${L('الحالة', 'Status')}</th><th>${L('المكان', 'Location')}</th><th>${L('الحضور', 'Check-in')}</th>
-        <th style="min-width:180px">${L('إجمالي اليوم', 'Total today')}</th><th>${L('شغل / استراحة / اجتماع', 'Work / break / meeting')}</th><th></th>
+        <th style="min-width:180px">${L('العمل والاجتماعات', 'Work & meetings')}</th><th>${L('الاستراحة', 'Break')}</th><th></th>
       </tr></thead><tbody>${rows.map(u => {
         const i = infos.get(u.email);
         return `<tr class="${i.on ? '' : 'idle'}" data-email="${esc(u.email)}">
