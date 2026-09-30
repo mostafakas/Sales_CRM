@@ -36,6 +36,8 @@ const ACTIONS = {
   'payroll.pay': ['سجّل صرف رواتب', 'Recorded salary payment', 'fa-money-bill-transfer', 'ok'],
   'payroll.status': ['غيّر حالة راتب', 'Changed a salary status', 'fa-money-bill-transfer', 'info'],
   'chat.archive': ['أرشف محادثة', 'Archived a chat', 'fa-box-archive', 'warn'],
+  'chat.group_create': ['عمل جروب شات', 'Created a chat group', 'fa-users', 'brand'],
+  'chat.group_update': ['عدّل جروب شات', 'Edited a chat group', 'fa-users-gear', 'info'],
   'user.create': ['أضاف موظف', 'Added an employee', 'fa-user-plus', 'brand'],
   'user.update': ['عدّل بيانات موظف', 'Edited an employee', 'fa-user-pen', 'info'],
   'user.rename': ['غيّر اسم مستخدم', 'Changed a username', 'fa-right-left', 'warn'],

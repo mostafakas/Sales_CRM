@@ -90,7 +90,7 @@ function setBadges() {
 
 /** New chat messages: badge in the menu + a popup with a short sound (and a browser notification when the tab is hidden) */
 async function startChatWatcher() {
-  const { watchMyChats, unreadOf } = await import('./services/chat.js');
+  const { watchMyChats, unreadOf, isGroup, isMuted } = await import('./services/chat.js');
   const { person, nameOf } = await import('./services/directory.js');
   const { livePop } = await import('./core/ui.js');
   const { play } = await import('./core/sounds.js');
@@ -98,10 +98,12 @@ async function startChatWatcher() {
   let seen = now();
   const popup = (c, lm) => {
     const from = person(lm.by) || { email: lm.by, name: nameOf(lm.by) };
-    livePop({ who: from, title: from.name || from.email, text: lm.text || '', href: `#/chat/${encodeURIComponent(c.id)}`, action: L('رد', 'Reply') });
+    // a group message says which group it came from, with that group's own unread count
+    const title = isGroup(c) ? `${from.name || from.email} · ${c.name}${unreadOf(c) > 1 ? ` (${unreadOf(c)})` : ''}` : (from.name || from.email);
+    livePop({ who: from, title, text: lm.text || '', href: `#/chat/${encodeURIComponent(c.id)}`, action: L('رد', 'Reply') });
     play('receive');
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      try { const n = new Notification(from.name || from.email, { body: lm.text || '', icon: 'assets/img/icon-192.png', tag: c.id }); n.onclick = () => { window.focus(); location.hash = `#/chat/${encodeURIComponent(c.id)}`; n.close(); }; } catch {}
+      try { const n = new Notification(title, { body: lm.text || '', icon: 'assets/img/icon-192.png', tag: c.id }); n.onclick = () => { window.focus(); location.hash = `#/chat/${encodeURIComponent(c.id)}`; n.close(); }; } catch {}
     }
   };
   watchMyChats(chats => {
@@ -113,6 +115,7 @@ async function startChatWatcher() {
       const at = toMs(lm.at) || 0; if (at <= seen) return;
       newest = Math.max(newest, at);
       if (window.__amOpenChat === c.id && !document.hidden) return;
+      if (isMuted(c)) return; // notifications switched off for this chat: the counter still counts
       popup(c, lm);
     });
     seen = newest;

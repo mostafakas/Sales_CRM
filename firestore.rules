@@ -333,29 +333,45 @@ service cloud.firestore {
     function inChat(id) { return active() && me() in chatDoc(id).members; }
     match /chats/{id} {
       allow read: if active() && (resource == null || me() in resource.data.members || isAdmin());
+      // 1:1 conversation between two employees
       allow create: if active()
         && request.resource.data.members is list && request.resource.data.members.size() == 2
         && me() in request.resource.data.members
         && request.resource.data.members[0] < request.resource.data.members[1]
         && id == request.resource.data.members[0] + '__' + request.resource.data.members[1]
+        && request.resource.data.keys().hasOnly(['members', 'createdAt', 'updatedAt', 'createdBy', 'lastMessage', 'unread', 'lastRead'])
         && exists(uPath(request.resource.data.members[0])) && exists(uPath(request.resource.data.members[1]));
-      // members: last message, unread counters, read receipts
+      // groups are created by the system admin only
+      allow create: if isAdmin() && request.resource.data.type == 'group'
+        && request.resource.data.members is list && request.resource.data.members.size() >= 2 && request.resource.data.members.size() <= 300
+        && me() in request.resource.data.members
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80;
+      // members: last message, unread counters, read receipts, their own mute switch
       allow update: if active() && me() in resource.data.members
         && request.resource.data.members == resource.data.members
-        && onlyChanged(['lastMessage', 'updatedAt', 'unread', 'lastRead']);
-      // admin: archive
-      allow update: if isAdmin() && request.resource.data.members == resource.data.members
-        && onlyChanged(['archivedAt', 'archivedBy', 'archivedCount', 'lastMessage', 'updatedAt']);
+        && onlyChanged(['lastMessage', 'updatedAt', 'unread', 'lastRead', 'muted']);
+      // group admins: name, photo and members (they cannot change who the admins are, nor the edit switch,
+      // and every admin of the group stays a member)
+      allow update: if active() && resource.data.get('type', '') == 'group' && me() in resource.data.get('admins', [])
+        && onlyChanged(['name', 'photo', 'members', 'unread', 'updatedAt'])
+        && request.resource.data.members is list && request.resource.data.members.size() >= 2 && request.resource.data.members.size() <= 300
+        && request.resource.data.members.hasAll(resource.data.get('admins', []));
+      // system admin: everything (group settings, group admins, archive)
+      allow update: if isAdmin();
       allow delete: if isAdmin();
 
       match /messages/{m} {
         allow read: if isAdmin() || inChat(id);
         allow create: if inChat(id) && request.resource.data.by == me() && request.resource.data.at == request.time
           && request.resource.data.keys().hasOnly(['by', 'type', 'text', 'file', 'at'])
-          && request.resource.data.type in ['text', 'image', 'file']
+          && request.resource.data.type in ['text', 'image', 'file', 'voice']
           && request.resource.data.text is string && request.resource.data.text.size() <= 4000
           && (!('file' in request.resource.data) || (request.resource.data.file is map && request.resource.data.file.get('thumb', '').size() < 150000));
-        allow update: if false;
+        // edit / delete your own message — only in a group where the system admin switched it on
+        allow update: if isAdmin() || (inChat(id) && resource.data.by == me()
+          && chatDoc(id).get('allowEdit', false) == true
+          && onlyChanged(['text', 'type', 'file', 'edited', 'editedAt', 'deleted', 'deletedAt'])
+          && request.resource.data.text is string && request.resource.data.text.size() <= 4000);
         allow delete: if isAdmin();
       }
     }
