@@ -6,6 +6,7 @@ import {
 import { session, now, isHR, seesAll, isFinance, syncClock } from '../core/session.js';
 import { policy, dayKey, planFor, isWorkingPlan } from '../core/policy.js';
 import { cairoMs, addDays, L } from '../core/utils.js';
+import { userError } from '../core/ui.js';
 
 export const COUNTED = ['Online', 'Break', 'Meeting'];
 export const dayDocId = (email, date) => `${email}_${date}`;
@@ -94,21 +95,18 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     const firstIn = toMs(u.firstOnlineAt) || (existing && existing.checkInMs);
     const resuming = u.dayKey === key && !!existing && (!firstIn || dayKey(firstIn) === key);
     const b = writeBatch(db);
-    const bank = resuming ? { ...zeroBank(), ...(u.timeBank || {}) } : zeroBank();
-    // checking in within the grace period: not late, and the minutes since the start of the shift count as work
-    const credit = resuming ? 0 : await graceCredit(email, key, at);
-    bank.Online += credit;
-    const upd = {
-      status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: bank,
-      dayKey: key, checkedOut: false, workLocation: resuming ? (u.workLocation || mode) : mode,
-      remotePending: resuming ? !!u.remotePending : (mode === 'remote' && !remoteApproved)
-    };
-    if (!resuming) upd.firstOnlineAt = serverTimestamp();
-    b.update(doc(db, 'users', email), upd);
     if (resuming) {
+      // resuming writes only what changes (status + reopened day); counters, place and flags stay as they were
+      b.update(doc(db, 'users', email), { status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), checkedOut: false });
       // closedBy goes back to '' — a day ended by HR/the leader must stay resumable by its owner
-      b.set(dayRef, { closed: false, closedBy: '', checkOutMs: null, updatedAt: serverTimestamp() }, { merge: true });
+      b.update(dayRef, { closed: false, closedBy: '', checkOutMs: null, updatedAt: serverTimestamp() });
     } else {
+      // checking in within the grace period: not late, and the minutes since the start of the shift count as work
+      const credit = await graceCredit(email, key, at);
+      b.update(doc(db, 'users', email), {
+        status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: { ...zeroBank(), Online: credit },
+        dayKey: key, checkedOut: false, workLocation: mode, remotePending: mode === 'remote' && !remoteApproved, firstOnlineAt: serverTimestamp()
+      });
       b.set(dayRef, {
         email, name: u.name || email, date: key, leaderEmail: u.leaderEmail || '', department: u.department || '',
         mode, remotePending: mode === 'remote' && !remoteApproved,
@@ -127,7 +125,10 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
     await syncClock();
     u = await read('users', email);
     try { return await attempt(); }
-    catch (e2) { throw withDiag(e2, u); }
+    catch (e2) {
+      const rec = await getDoc(doc(db, 'attendance_days', dayDocId(email, dayKey(now())))).then(s => (s.exists() ? s.data() : null)).catch(() => ({ unreadable: true }));
+      throw withDiag(e2, u, rec);
+    }
   }
 }
 
@@ -142,9 +143,11 @@ async function graceCredit(email, key, at) {
 }
 
 /** Short technical note shown with the error, so a screenshot tells us what was rejected */
-function withDiag(e, u) {
+function withDiag(e, u, dayDoc) {
   const lc = u && u.lastChange;
+  const d = dayDoc || null;
   const diag = [
+    `rec:${!d ? 'none' : `${d.email ? 'e' : 'no-email'}/in:${d.checkInMs ? Math.round((now() - d.checkInMs) / 60000) + 'm' : '-'}/w:${Math.round(((d.workMs || 0) + (d.breakMs || 0) + (d.meetingMs || 0)) / 60000)}m/c:${Math.round((d.creditMs || 0) / 60000)}m/${d.closedBy || '-'}${d.corrected ? '/corr' : ''}`}`,
     `day:${(u && u.dayKey) || '-'}→${dayKey(now())}`, `st:${(u && u.status) || '-'}`, `out:${u && u.checkedOut}`,
     `lc:${lc == null ? 'none' : (typeof lc.toMillis === 'function' ? 'ts' : typeof lc)}`,
     `tb:${JSON.stringify((u && u.timeBank) || {}).slice(0, 60)}`, `clk:${Math.round(session.offset / 1000)}s`,
@@ -162,6 +165,7 @@ export async function changeStatus(email, newStatus, by = session.email) {
   if (!u) throw new Error('no user');
   const old = u.status || 'Offline';
   if (old === newStatus) return;
+  if (by !== email && u.dayKey !== dayKey(now())) throw userError('الموظف مش بادئ يوم النهارده، فمينفعش تغيّر حالته. لو فيه يوم قديم مفتوح اقفله الأول.', 'This employee has not started today, so their status cannot be changed. Close any open previous day first.');
   const at = now();
   const start = toMs(u.lastChange) || u.lastChangeClient || at;
   const dur = Math.max(0, at - start);

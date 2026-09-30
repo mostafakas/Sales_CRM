@@ -269,7 +269,8 @@ export async function decide(id, action, note = '', edits = null) {
     return 'rejected';
   }
   const requester = person(r.email) || { leaderEmail: r.leaderEmail };
-  const next = nextStatusFromStages(r);
+  // the admin's approval is final: the remaining stages are skipped
+  const next = isAdmin() ? 'approved' : nextStatusFromStages(r);
   if (next !== 'approved') {
     await settle(updateDoc(doc(db, 'requests', id), { status: next, updatedAt: serverTimestamp(), history: arrayUnion(entry) }));
     const nextStage = next.replace('pending_', '');
@@ -347,9 +348,12 @@ export async function applyApproval(id, entry) {
 
   // effects outside the transaction
   if (r0.type === 'remote' && dates.includes(ymd(now()))) {
+    // clear "remote pending" only on a day the employee already started — never create an empty day record,
+    // which would stop them from starting the day
     try {
-      await setDoc(doc(db, 'attendance_days', `${email}_${ymd(now())}`), { remotePending: false, updatedAt: serverTimestamp() }, { merge: true });
-      await updateDoc(doc(db, 'users', email), { remotePending: false });
+      const dayRef = doc(db, 'attendance_days', `${email}_${ymd(now())}`);
+      if ((await getDoc(dayRef)).exists()) await updateDoc(dayRef, { remotePending: false, updatedAt: serverTimestamp() });
+      if ((person(email) || {}).remotePending) await updateDoc(doc(db, 'users', email), { remotePending: false });
     } catch (e) { console.warn('remote flag', e && e.message); }
   }
   if (r0.type === 'correction' && r0.correction) {

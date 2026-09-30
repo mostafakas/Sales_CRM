@@ -257,14 +257,17 @@ export default async function render(root) {
       const i = info(u);
       const hr = isHR();
       const cur = i.on ? u.status : 'Offline';
-      // a leader switches the status of a day that already started today (starting a day is the employee's own action)
+      // statuses are switched only on a day that is running today: someone who has not started yet (or is still
+      // "running" a previous day) has no today to change — the change would land on the wrong day and not show
       const startedToday = u.dayKey === today() && !!i.fo;
+      const why = i.stale ? L(`الموظف ما قفلش يوم ${i.stale} ولسه ما بدأش النهارده — اقفل اليوم ده الأول من الزرار تحت.`, `${i.stale} was never ended and today has not started — close that day first with the button below.`)
+        : L('الموظف لسه ما بدأش يومه النهارده — تقدر تغيّر حالته بعد ما يبدأ.', 'This employee has not started today yet — you can change their status once they do.');
       const m = modal({
         title: u.name || email, icon: 'fa-user-gear', size: 'narrow',
         body: `<div class="col gap-8">
           <div class="label">${L('تغيير الحالة يدوياً', 'Force status')}</div>
-          ${!hr && !startedToday ? `<p class="xs muted">${L('الموظف لسه ما بدأش يومه النهارده — تقدر تغيّر حالته بعد ما يبدأ.', 'This employee has not started today yet — you can change their status once they do.')}</p>` : ''}
-          <div class="grid g-2" style="gap:8px">${[...COUNTED, 'Offline'].map(k => `<button class="btn btn-sm" data-force="${k}" ${cur === k || (!hr && !startedToday) ? 'disabled' : ''}><i class="fas ${STATUS_META[k].icon}"></i> ${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}</button>`).join('')}</div>
+          ${!startedToday ? `<p class="xs muted">${esc(why)}</p>` : ''}
+          <div class="grid g-2" style="gap:8px">${[...COUNTED, 'Offline'].map(k => `<button class="btn btn-sm" data-force="${k}" ${cur === k || !startedToday ? 'disabled' : ''}><i class="fas ${STATUS_META[k].icon}"></i> ${esc(L(STATUS_META[k].ar, STATUS_META[k].en))}</button>`).join('')}</div>
           <div class="divider"></div>
           ${i.stale ? `<button class="btn btn-sm" data-do="close"><i class="fas fa-flag-checkered"></i> ${L(`قفل يوم ${i.stale} على ميعاد الانصراف`, `Close ${i.stale} at planned end time`)}</button>` : ''}
           ${hr ? `<button class="btn btn-sm" data-do="reset"><i class="fas fa-rotate-left"></i> ${L('تصفير العدادات الحالية', 'Reset live counters')}</button>

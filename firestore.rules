@@ -168,7 +168,11 @@ service cloud.firestore {
         return d.get('checkOutMs', null) == null
           || (d.checkOutMs <= nowMs() + 300000 && (d.get('autoClosed', false) == true || d.checkOutMs >= nowMs() - 300000));
       }
-      allow read: if active() && (resource == null || resource.data.email == me() || seesAll() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      allow read: if active() && (resource == null || resource.data.get('email', '') == me() || id.split('_')[0] == me() || seesAll() || isFinance() || resource.data.get('leaderEmail', '') == me());
+      // resume a finished day: only reopens it (no counter changes), so no time check is needed
+      allow update: if active() && resource.data.get('email', '') == me()
+        && onlyChanged(['closed', 'closedBy', 'checkOutMs', 'updatedAt'])
+        && request.resource.data.closed == false && request.resource.data.checkOutMs == null && request.resource.data.closedBy == '';
       // HR corrections (not on their own days)
       allow write: if isHR() && othersOnly();
       // self create (start of day, or closing a forgotten day)
@@ -187,9 +191,11 @@ service cloud.firestore {
         && (!('remotePending' in affected()) || request.resource.data.remotePending == true)
         && workSum(request.resource.data) <= nowMs() - resource.data.get('checkInMs', 0) + resource.data.get('creditMs', 0) + 300000
         && checkOutOk(request.resource.data);
-      // self first check-in on a day doc that exists without one (pre-created by HR or migration)
-      allow update: if active() && resource.data.email == me() && request.resource.data.email == me()
-        && resource.data.get('checkIn', null) == null && resource.data.get('corrected', false) == false
+      // self first check-in on a day doc that exists without one (pre-created by HR, an approval or the migration —
+      // even a partial one without an email): it is the employee's own day, so starting it is always allowed
+      allow update: if active() && id == me() + '_' + request.resource.data.date
+        && resource.data.get('email', me()) == me() && request.resource.data.email == me()
+        && resource.data.get('checkIn', null) == null
         && onlyChanged(selfKeys())
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
         && creditOk(request.resource.data)
