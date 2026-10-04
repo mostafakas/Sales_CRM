@@ -5,6 +5,8 @@ import { session, isAdmin } from '../core/session.js';
 import { userError } from '../core/ui.js';
 import { imageToDataUrl, L } from '../core/utils.js';
 import { track } from './activity.js';
+import { notifyMany } from './notify.js';
+import { nameOf } from './directory.js';
 
 export const MAX_FILE = 5 * 1024 * 1024;           // 5 MB per file / voice note
 const CHUNK = 700000;                              // base64 characters per Firestore doc (< 1 MB)
@@ -13,6 +15,8 @@ export const chatIdFor = (a, b) => [String(a).toLowerCase(), String(b).toLowerCa
 export const otherOf = (chat, me = session.email) => (chat.members || []).find(m => m !== me) || me;
 export const othersOf = (chat, me = session.email) => (chat.members || []).filter(m => m !== me);
 export const unreadOf = (chat, me = session.email) => Number((chat.unread || {})[ek(me)] || 0);
+/** someone tagged me with @ since I last opened the chat */
+export const mentionedMe = (chat, me = session.email) => !!((chat && chat.mentioned) || {})[ek(me)];
 
 // ---------- groups ----------
 export const isGroup = (chat) => !!chat && chat.type === 'group';
@@ -89,19 +93,33 @@ async function post(chat, msg, preview) {
   const m = doc(col(`chats/${chat.id}/messages`));
   b.set(m, { by: session.email, type: 'text', text: '', ...msg, at: serverTimestamp() });
   const upd = {
-    lastMessage: { by: session.email, text: preview.slice(0, 140), type: msg.type || 'text', at: serverTimestamp() },
+    lastMessage: { id: m.id, by: session.email, text: preview.slice(0, 140), type: msg.type || 'text', at: serverTimestamp() },
     updatedAt: serverTimestamp(), [`unread.${ek(session.email)}`]: 0
   };
   othersOf(chat).forEach(o => { upd[`unread.${ek(o)}`] = increment(1); }); // one counter per member
+  (msg.mentions || []).forEach(o => { upd[`mentioned.${ek(o)}`] = true; });   // the "@" mark on the chat list
   b.update(doc(db, 'chats', chat.id), upd);
   await settle(b.commit(), 6000);
   return m.id;
 }
-export function sendText(chat, text) {
+/**
+ * Send a text. In a group it may carry mentions: `mentions` = emails of members tagged with @, `tasks` = tasks
+ * tagged with # as {id, num, title} (the title is stored in the message so every member can read it).
+ */
+export function sendText(chat, text, { mentions = [], tasks = [] } = {}) {
   const t = String(text || '').trim();
   if (!t) return Promise.resolve();
   if (t.length > 4000) throw userError('الرسالة طويلة جداً.', 'The message is too long.');
-  return post(chat, { type: 'text', text: t }, t);
+  const msg = { type: 'text', text: t };
+  if (isGroup(chat)) {
+    const ms = [...new Set(mentions)].filter(e => e !== session.email && (chat.members || []).includes(e)).slice(0, 50);
+    const ts = tasks.filter((x, i, a) => x && x.id && a.findIndex(y => y.id === x.id) === i).slice(0, 10)
+      .map(x => ({ id: String(x.id), num: Number(x.num) || 0, title: String(x.title || '').slice(0, 200) }));
+    if (ms.length) msg.mentions = ms;
+    if (ts.length) msg.tasks = ts;
+    if (ms.length) notifyMany(ms, L(`${nameOf(session.email)} عملك منشن في ${chat.name}`, `${nameOf(session.email)} mentioned you in ${chat.name}`), t.slice(0, 140), `#/chat/${encodeURIComponent(chat.id)}`, 'info');
+  }
+  return post(chat, msg, t);
 }
 
 const readAsDataUrl = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
@@ -165,7 +183,7 @@ export async function loadFile(meta) {
 }
 
 // ---------- edit / delete (only where the admin enabled it) ----------
-const isLast = (chat, m) => chat.lastMessage && chat.lastMessage.by === m.by && toMs(chat.lastMessage.at) === toMs(m.at);
+const isLast = (chat, m) => !!chat.lastMessage && (chat.lastMessage.id ? chat.lastMessage.id === m.id : chat.lastMessage.by === m.by && toMs(chat.lastMessage.at) === toMs(m.at));
 export async function editMessage(chat, m, text) {
   if (!canEditMessage(chat, m) || m.by !== session.email) throw userError('تعديل الرسايل مش مفعّل في الجروب ده.', 'Editing messages is not enabled in this group.');
   const t = String(text || '').trim();
@@ -197,7 +215,7 @@ export async function markRead(chat) {
   if (!unreadOf(chat) && (!incomingAt || readAt >= incomingAt)) return;
   if (reading.has(chat.id)) return;
   reading.add(chat.id);
-  try { await settle(updateDoc(doc(db, 'chats', chat.id), { [`unread.${me}`]: 0, [`lastRead.${me}`]: serverTimestamp() }), 4000); }
+  try { await settle(updateDoc(doc(db, 'chats', chat.id), { [`unread.${me}`]: 0, [`lastRead.${me}`]: serverTimestamp(), ...(mentionedMe(chat) ? { [`mentioned.${me}`]: false } : {}) }), 4000); }
   catch (e) { console.warn('markRead', e && e.message); }
   finally { setTimeout(() => reading.delete(chat.id), 1200); }
 }

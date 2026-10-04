@@ -10,8 +10,9 @@ import { play } from '../core/sounds.js';
 import {
   ensureChat, watchMyChats, watchAllChats, watchMessages, sendText, sendFile, sendVoice, loadFile, markRead, archiveChat, listArchive,
   otherOf, othersOf, unreadOf, ek, MAX_FILE, isGroup, canManageGroup, isMuted, seenBy, canEditMessage, createGroup, updateGroup, setMuted,
-  editMessage, deleteMessage
+  editMessage, deleteMessage, mentionedMe
 } from '../services/chat.js';
+import { mountTasks } from './chat-tasks.js';
 
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 const fmtLen = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.floor((s || 0) % 60)).padStart(2, '0')}`;
@@ -25,13 +26,32 @@ const presence = (p) => {
 const dotFor = (p) => { const on = p && p.dayKey && p.status && p.status !== 'Offline'; return `<span class="status-dot" style="background:${on ? STATUS_META[p.status].color : 'var(--neutral)'}"></span>`; };
 const who = (email) => person(email) || { email, name: nameOf(email) };
 const groupPic = (c, size = '') => c.photo ? `<span class="avatar ${size}"><img src="${esc(c.photo)}" alt=""></span>` : `<span class="avatar chat-gav ${size}" aria-hidden="true"><i class="fas fa-users"></i></span>`;
-/** Escaped text with http(s) links made clickable */
-const linkify = (text) => String(text || '').split(/(https?:\/\/[^\s<]+)/g).map((part, i) => i % 2 ? `<a href="${esc(part)}" target="_blank" rel="noopener">${esc(part)}</a>` : esc(part)).join('');
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Escaped message text: http(s) links clickable, "@name" of mentioned members highlighted and "#12" of tagged
+ * tasks shown as a chip with the task title (the title travels inside the message, so every member can read it).
+ */
+function richText(m) {
+  const names = (m.mentions || []).map(e => ({ e, n: '@' + nameOf(e) })).sort((a, b) => b.n.length - a.n.length);
+  const tasks = m.tasks || [];
+  const parts = [];
+  if (names.length) parts.push(names.map(x => reEsc(x.n)).join('|'));
+  if (tasks.length) parts.push(`#(?:${tasks.map(t => Number(t.num) || 0).join('|')})(?![0-9])`);
+  const re = parts.length ? new RegExp(`(${parts.join('|')})`, 'g') : null;
+  const deco = (txt) => !re ? esc(txt) : txt.split(re).map((p, i) => {
+    if (!(i % 2)) return esc(p);
+    if (p[0] === '#') { const t = tasks.find(x => `#${x.num}` === p); return t ? `<button class="chat-taskref" data-task="${esc(t.id)}" title="${esc(t.title)}">#${Number(t.num) || 0} · ${esc(t.title)}</button>` : esc(p); }
+    const x = names.find(n => n.n === p);
+    return `<span class="chat-mention ${x && x.e === session.email ? 'me' : ''}">${esc(p)}</span>`;
+  }).join('');
+  return String(m.text || '').split(/(https?:\/\/[^\s<]+)/g).map((part, i) => i % 2 ? `<a href="${esc(part)}" target="_blank" rel="noopener">${esc(part)}</a>` : deco(part)).join('');
+}
 
 export default async function render(root, { params }) {
   let openId = params && params[0] ? decodeURIComponent(params[0]) : '';
+  let openTaskId = params && params[1] ? decodeURIComponent(params[1]) : ''; // link from a task notification
   let mode = 'mine', chats = [], allChats = [], term = '', openChat = null, msgs = [], showArchive = false, archived = [];
-  let unChats = null, unAll = null, unMsgs = null, recorder = null;
+  let unChats = null, unAll = null, unMsgs = null, recorder = null, tasksUi = null;
   const admin = isAdmin();
 
   root.innerHTML = `
@@ -181,7 +201,7 @@ export default async function render(root, { params }) {
       return `<a class="chat-conv ${c.id === openId ? 'on' : ''} ${n ? 'unread' : ''}" href="#/chat/${encodeURIComponent(c.id)}">
         ${pic}
         <span class="grow min0"><span class="row between gap-8"><b class="truncate">${g ? '<i class="fas fa-users faint" style="font-size:11px"></i> ' : ''}${esc(convTitle(c))}</b><small class="faint num">${lm && lm.at ? esc(ymd(toMs(lm.at)) === ymd(now()) ? fmtTime(toMs(lm.at)) : fmtDate(toMs(lm.at))) : ''}</small></span>
-        <span class="row between gap-8"><small class="truncate">${esc(prev)}</small><span class="row gap-4">${mine && isMuted(c) ? `<i class="fas fa-bell-slash faint" style="font-size:11px" title="${L('الإشعارات مقفولة', 'Muted')}"></i>` : ''}${n ? `<span class="badge-count ${isMuted(c) ? 'muted-count' : ''}">${n > 99 ? '99+' : n}</span>` : ''}</span></span></span></a>`;
+        <span class="row between gap-8"><small class="truncate">${esc(prev)}</small><span class="row gap-4">${mine && isMuted(c) ? `<i class="fas fa-bell-slash faint" style="font-size:11px" title="${L('الإشعارات مقفولة', 'Muted')}"></i>` : ''}${mine && mentionedMe(c) ? `<span class="badge-at" title="${L('حد عملك منشن', 'You were mentioned')}">@</span>` : ''}${n ? `<span class="badge-count ${isMuted(c) ? 'muted-count' : ''}">${n > 99 ? '99+' : n}</span>` : ''}</span></span></span></a>`;
     }).join('');
   }
   $('#q').oninput = debounce((e) => { term = e.target.value.trim().toLowerCase(); drawList(); }, 120);
@@ -214,6 +234,7 @@ export default async function render(root, { params }) {
   }
   async function openThread(id) {
     if (unMsgs) { unMsgs(); unMsgs = null; }
+    if (tasksUi) { tasksUi.destroy(); tasksUi = null; }
     stopRecording(true);
     openId = id; window.__amOpenChat = id; showArchive = false; archived = [];
     $('#app').classList.toggle('has-open', !!id);
@@ -229,12 +250,13 @@ export default async function render(root, { params }) {
         <div class="row gap-12 grow min0" id="chat-head-main"></div>
         ${admin ? `<div class="row gap-4"><button class="btn btn-sm btn-ghost" id="arch-view" title="${L('الرسائل المؤرشفة', 'Archived messages')}"><i class="fas fa-box-archive"></i><span class="hide-sm"> ${L('الأرشيف', 'Archive')}</span></button><button class="btn btn-sm btn-ghost" id="arch" title="${L('أرشفة المحادثة', 'Archive conversation')}" style="color:var(--bad)"><i class="fas fa-folder-minus"></i><span class="hide-sm"> ${L('أرشفة', 'Archive now')}</span></button></div>` : ''}
       </header>
+      ${isGroup(openChat) ? '<section class="chat-tasks hidden" id="tasks"></section>' : ''}
       <div class="chat-msgs" id="msgs">${loader()}</div>
       ${member ? `<form class="chat-compose" id="compose">
         <div class="chat-upload hidden" id="up"><div class="progress"><span style="width:0%"></span></div><small id="up-t"></small></div>
         <div class="row gap-8" style="align-items:flex-end" id="compose-row">
           <label class="btn btn-ghost btn-icon" title="${L('إرفاق صورة أو ملف', 'Attach an image or file')}"><i class="fas fa-paperclip"></i><input type="file" id="file" multiple hidden></label>
-          <textarea class="input chat-input" id="text" rows="1" placeholder="${L('اكتب رسالة…', 'Write a message…')}"></textarea>
+          <textarea class="input chat-input" id="text" rows="1" placeholder="${isGroup(openChat) ? L('اكتب رسالة… (@ منشن · # تاسك)', 'Message… (@ mention · # task)') : L('اكتب رسالة…', 'Write a message…')}"></textarea>
           <button class="btn btn-ghost btn-icon" type="button" id="mic" title="${L('رسالة صوتية', 'Voice note')}" aria-label="${L('رسالة صوتية', 'Voice note')}"><i class="fas fa-microphone"></i></button>
           <button class="btn btn-primary btn-icon" type="submit" aria-label="${L('إرسال', 'Send')}"><i class="fas fa-paper-plane" data-flip></i></button>
         </div>
@@ -243,12 +265,17 @@ export default async function render(root, { params }) {
           <button class="btn btn-primary btn-icon" type="button" id="rec-ok" title="${L('إرسال', 'Send')}"><i class="fas fa-paper-plane" data-flip></i></button></div>
       </form>` : ''}`;
     drawHead();
+    if (isGroup(openChat)) {
+      tasksUi = mountTasks($('#tasks'), { getChat: () => openChat, getMsgs: () => msgs, jumpTo });
+      tasksUi.start(openChat);
+    }
     let known = null;
     unMsgs = watchMessages(id, rows => {
       // a new message from someone else while the conversation is open → soft "receive" sound
       if (known && rows.some(m => !known.has(m.id) && m.by !== session.email) && !isMuted(openChat)) play('receive');
       known = new Set(rows.map(m => m.id));
       msgs = rows; drawMsgs();
+      if (openTaskId && tasksUi) { tasksUi.open(openTaskId); openTaskId = ''; } // after the messages, so "messages about it" is filled
       if (member && !document.hidden) markRead(openChat);
     });
     if (member) wireComposer();
@@ -280,7 +307,7 @@ export default async function render(root, { params }) {
       if (m.type === 'image' && m.file) body += `<button class="chat-img" data-file="${esc(m.file.id)}" title="${esc(m.file.name)}"><img src="${esc(m.file.thumb || '')}" alt="${esc(m.file.name)}" loading="lazy"></button>`;
       if (m.type === 'file' && m.file) body += `<button class="chat-file" data-file="${esc(m.file.id)}"><i class="fas ${fileIcon(m.file.mime, m.file.name)}"></i><span class="min0 grow"><b class="truncate">${esc(m.file.name)}</b><small>${esc(fmtSize(m.file.size || 0))}</small></span><i class="fas fa-download"></i></button>`;
       if (m.type === 'voice' && m.file) body += `<div class="chat-voice" data-voice="${esc(m.file.id)}"><button class="btn btn-icon chat-voice-play" data-play="${esc(m.file.id)}" aria-label="${L('تشغيل', 'Play')}"><i class="fas fa-play"></i></button><span class="chat-voice-wave"></span><span class="num small">${esc(fmtLen(m.file.dur))}</span></div>`;
-      if (m.text) body += `<div class="chat-text">${linkify(m.text)}</div>`;
+      if (m.text) body += `<div class="chat-text">${richText(m)}</div>`;
     }
     const showWho = (g || !member) && side === 'them' && !grouped;
     const label = showWho ? `<small class="chat-who">${esc(nameOf(m.by))}</small>` : '';
@@ -291,7 +318,8 @@ export default async function render(root, { params }) {
       else { const seenAt = toMs((openChat.lastRead || {})[ek(otherOf(openChat))]) || 0; tick = `<i class="fas ${seenAt && at && at <= seenAt ? 'fa-check-double seen' : (at ? 'fa-check' : 'fa-clock')}"></i>`; }
     }
     const tools = canEditMessage(openChat, m) && at ? `<span class="chat-tools">${m.by === session.email && m.text && m.type === 'text' ? `<button data-edit="${esc(m.id)}" title="${L('تعديل', 'Edit')}"><i class="fas fa-pen"></i></button>` : ''}<button data-del="${esc(m.id)}" title="${L('حذف', 'Delete')}"><i class="fas fa-trash"></i></button></span>` : '';
-    return `<div class="chat-row ${side} ${grouped ? 'grouped' : ''}">${label}<div class="chat-bubble ${m.archivedAt ? 'archived' : ''}">${body}<span class="chat-meta num">${tools}${m.edited && !m.deleted ? `<span>${L('اتعدلت', 'edited')}</span>` : ''}${at ? esc(fmtTime(at)) : ''} ${tick}</span></div></div>`;
+    const tagged = !mine && !m.deleted && (m.mentions || []).includes(session.email);
+    return `<div class="chat-row ${side} ${grouped ? 'grouped' : ''}" data-mid="${esc(m.id)}">${label}<div class="chat-bubble ${m.archivedAt ? 'archived' : ''} ${tagged ? 'mentioned' : ''}">${body}<span class="chat-meta num">${tools}${m.edited && !m.deleted ? `<span>${L('اتعدلت', 'edited')}</span>` : ''}${at ? esc(fmtTime(at)) : ''} ${tick}</span></div></div>`;
   }
   function drawMsgs() {
     const el = $('#msgs'); if (!el || !openChat) return;
@@ -329,6 +357,13 @@ export default async function render(root, { params }) {
 
   $('#thread').addEventListener('click', async (e) => {
     const find = (id) => [...msgs, ...archived].find(x => x.id === id);
+    const tr = e.target.closest('[data-task]');
+    if (tr) {
+      const mineTask = tasksUi && tasksUi.list().some(t => t.id === tr.dataset.task);
+      if (mineTask) tasksUi.open(tr.dataset.task);
+      else toast(tr.title || L('تاسك', 'Task'), L('التاسك ده مش مسند ليك — بتشوف عنوانه بس.', 'This task is not assigned to you — you only see its title.'), 'info');
+      return;
+    }
     const seen = e.target.closest('[data-seen]'); if (seen) { const m = find(seen.dataset.seen); if (m) showSeen(m); return; }
     const ed = e.target.closest('[data-edit]');
     if (ed) {
@@ -414,14 +449,19 @@ export default async function render(root, { params }) {
     const f = $('#compose'), ta = $('#text'), fi = $('#file');
     const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(140, ta.scrollHeight) + 'px'; };
     ta.oninput = grow;
-    ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); f.requestSubmit(); } };
+    ta.onkeydown = (e) => {
+      if (suggest.open && suggest.key(e)) return;
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); f.requestSubmit(); }
+    };
     f.onsubmit = async (e) => {
       e.preventDefault();
       const t = ta.value; if (!t.trim()) return;
-      ta.value = ''; grow();
+      const tags = collectTags(t);
+      ta.value = ''; grow(); picked.people.clear(); picked.tasks.clear();
       play('send');
-      try { await sendText(openChat, t); } catch (ex) { ta.value = t; toastErr(ex); }
+      try { await sendText(openChat, t, tags); } catch (ex) { ta.value = t; toastErr(ex); }
     };
+    wireMentions(ta, grow);
     const upload = async (files) => {
       const up = $('#up'), bar = up.querySelector('span'), label = $('#up-t');
       for (const file of files) {
@@ -444,6 +484,74 @@ export default async function render(root, { params }) {
     ta.focus();
   }
 
+  // ---------- mentions: "@" members, "#" my tasks ----------
+  const picked = { people: new Set(), tasks: new Map() };
+  const suggest = { open: false, items: [], idx: 0, key: () => false };
+  /** what to attach to the message: the people / tasks picked from the list that are still in the text (+ any "#12" typed by hand) */
+  function collectTags(text) {
+    if (!openChat || !isGroup(openChat)) return {};
+    const mentions = [...picked.people].filter(e => text.includes('@' + nameOf(e)));
+    const tasks = new Map([...picked.tasks].filter(([, t]) => new RegExp(`#${t.num}(?![0-9])`).test(text)));
+    const mine = tasksUi ? tasksUi.list() : [];
+    (text.match(/#[0-9]+/g) || []).forEach(h => { const t = mine.find(x => `#${x.num}` === h); if (t) tasks.set(t.id, t); });
+    return { mentions, tasks: [...tasks.values()].map(t => ({ id: t.id, num: t.num, title: t.title })) };
+  }
+  function wireMentions(ta, grow) {
+    if (!isGroup(openChat)) return;
+    const box = document.createElement('div'); box.className = 'chat-suggest hidden'; box.id = 'suggest';
+    $('#compose').prepend(box);
+    let token = null; // { kind: '@' | '#', start, q }
+    const close = () => { suggest.open = false; box.classList.add('hidden'); token = null; };
+    const pick = (i) => {
+      const it = suggest.items[i]; if (!it || !token) return;
+      const insert = it.kind === '@' ? `@${it.name} ` : `#${it.num} `;
+      const before = ta.value.slice(0, token.start), after = ta.value.slice(ta.selectionStart);
+      ta.value = before + insert + after;
+      const pos = (before + insert).length; ta.setSelectionRange(pos, pos);
+      if (it.kind === '@') picked.people.add(it.email); else picked.tasks.set(it.id, it.task);
+      close(); grow(); ta.focus();
+    };
+    const draw = () => {
+      box.innerHTML = suggest.items.map((it, i) => it.kind === '@'
+        ? `<button type="button" data-i="${i}" class="${i === suggest.idx ? 'on' : ''}">${avatar(it.p, 'sm')}<span class="min0"><b class="truncate">${esc(it.name)}</b><small class="truncate">${esc(it.p.title || '')}</small></span></button>`
+        : `<button type="button" data-i="${i}" class="${i === suggest.idx ? 'on' : ''}"><span class="sg-num">#${it.num}</span><span class="min0"><b class="truncate">${esc(it.task.title)}</b><small>${esc(it.status)}</small></span></button>`).join('');
+      box.classList.toggle('hidden', !suggest.items.length); suggest.open = !!suggest.items.length;
+    };
+    const update = () => {
+      const upto = ta.value.slice(0, ta.selectionStart);
+      const mm = upto.match(/(^|\s)([@#])([^\s@#]{0,30})$/);
+      if (!mm) { close(); return; }
+      token = { kind: mm[2], start: upto.length - mm[3].length - 1, q: mm[3].toLowerCase() };
+      if (token.kind === '@') {
+        suggest.items = othersOf(openChat).map(e => ({ kind: '@', email: e, p: who(e), name: nameOf(e) }))
+          .filter(x => !token.q || x.name.toLowerCase().includes(token.q) || x.email.includes(token.q)).sort((a, b) => a.name.localeCompare(b.name, 'ar')).slice(0, 8);
+      } else {
+        const STATUS = { new: 'New', in_progress: 'In progress', done: 'Finished' };
+        suggest.items = (tasksUi ? tasksUi.list() : []).slice().sort((a, b) => b.num - a.num)
+          .filter(t => !token.q || String(t.num).startsWith(token.q) || t.title.toLowerCase().includes(token.q))
+          .slice(0, 8).map(t => ({ kind: '#', id: t.id, num: t.num, task: t, status: `${STATUS[t.status] || ''}${t.assignee !== session.email ? ' · ' + nameOf(t.assignee) : ''}` }));
+      }
+      suggest.idx = 0; draw();
+    };
+    suggest.key = (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = suggest.items.length; suggest.idx = (suggest.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; draw(); return true; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(suggest.idx); return true; }
+      if (e.key === 'Escape') { e.preventDefault(); close(); return true; }
+      return false;
+    };
+    ta.addEventListener('input', update);
+    ta.addEventListener('click', update);
+    ta.addEventListener('blur', () => setTimeout(close, 150));
+    box.addEventListener('mousedown', (e) => { e.preventDefault(); const b = e.target.closest('[data-i]'); if (b) pick(Number(b.dataset.i)); });
+  }
+  /** scroll the chat to a message and flash it */
+  function jumpTo(id) {
+    const row = $('#msgs') && $('#msgs').querySelector(`[data-mid="${CSS.escape(id)}"]`);
+    if (!row) { toast(L('الرسالة دي قديمة ومش ظاهرة في الشات', 'That message is no longer shown'), '', 'info'); return; }
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  }
+
   // ---------- live data ----------
   unChats = watchMyChats(rows => {
     chats = rows; drawList();
@@ -454,7 +562,7 @@ export default async function render(root, { params }) {
       else if (!c && openChat && mode !== 'all' && openChat.members.includes(session.email)) { openChat = null; location.hash = '#/chat'; } // removed from the group
     }
   });
-  const offDir = onDirectory(() => { drawList(); });
+  const offDir = onDirectory(() => { drawList(); if (tasksUi) tasksUi.redraw(); });
   const onVis = () => { if (!document.hidden && openChat) markRead(openChat); };
   document.addEventListener('visibilitychange', onVis);
   if (openId) {
@@ -464,6 +572,7 @@ export default async function render(root, { params }) {
 
   return () => {
     stopRecording(true);
+    if (tasksUi) tasksUi.destroy();
     unChats && unChats(); unAll && unAll(); unMsgs && unMsgs(); offDir && offDir();
     document.removeEventListener('click', closePicker); document.removeEventListener('visibilitychange', onVis);
     window.__amOpenChat = '';

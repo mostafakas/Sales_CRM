@@ -346,10 +346,11 @@ service cloud.firestore {
         && request.resource.data.members is list && request.resource.data.members.size() >= 2 && request.resource.data.members.size() <= 300
         && me() in request.resource.data.members
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80;
-      // members: last message, unread counters, read receipts, their own mute switch
+      // members: last message, unread counters, read receipts, their own mute switch, "@" marks, the task counter
       allow update: if active() && me() in resource.data.members
         && request.resource.data.members == resource.data.members
-        && onlyChanged(['lastMessage', 'updatedAt', 'unread', 'lastRead', 'muted']);
+        && onlyChanged(['lastMessage', 'updatedAt', 'unread', 'lastRead', 'muted', 'mentioned', 'taskSeq'])
+        && request.resource.data.get('taskSeq', 0) >= resource.data.get('taskSeq', 0);
       // group admins: name, photo and members (they cannot change who the admins are, nor the edit switch,
       // and every admin of the group stays a member)
       allow update: if active() && resource.data.get('type', '') == 'group' && me() in resource.data.get('admins', [])
@@ -363,8 +364,10 @@ service cloud.firestore {
       match /messages/{m} {
         allow read: if isAdmin() || inChat(id);
         allow create: if inChat(id) && request.resource.data.by == me() && request.resource.data.at == request.time
-          && request.resource.data.keys().hasOnly(['by', 'type', 'text', 'file', 'at'])
+          && request.resource.data.keys().hasOnly(['by', 'type', 'text', 'file', 'at', 'mentions', 'tasks'])
           && request.resource.data.type in ['text', 'image', 'file', 'voice']
+          && (!('mentions' in request.resource.data) || (request.resource.data.mentions is list && request.resource.data.mentions.size() <= 50))
+          && (!('tasks' in request.resource.data) || (request.resource.data.tasks is list && request.resource.data.tasks.size() <= 10))
           && request.resource.data.text is string && request.resource.data.text.size() <= 4000
           && (!('file' in request.resource.data) || (request.resource.data.file is map && request.resource.data.file.get('thumb', '').size() < 150000));
         // edit / delete your own message — only in a group where the system admin switched it on
@@ -373,6 +376,39 @@ service cloud.firestore {
           && onlyChanged(['text', 'type', 'file', 'edited', 'editedAt', 'deleted', 'deletedAt'])
           && request.resource.data.text is string && request.resource.data.text.size() <= 4000);
         allow delete: if isAdmin();
+      }
+
+      // group tasks: a team leader gives a task to an employee they lead (users/{employee}.leaderEmail).
+      // Only the employee and that leader can see it (and system admins).
+      match /tasks/{t} {
+        function taskKeys() { return ['num', 'title', 'details', 'due', 'assignee', 'leader', 'status', 'createdAt', 'updatedAt', 'doneAt', 'doneNote', 'returnReason', 'history']; }
+        function taskTextOk(d) {
+          return d.title is string && d.title.size() > 0 && d.title.size() <= 200
+            && d.get('details', '') is string && d.get('details', '').size() <= 4000
+            && d.get('doneNote', '') is string && d.get('doneNote', '').size() <= 1000
+            && d.get('returnReason', '') is string && d.get('returnReason', '').size() <= 1000;
+        }
+        allow read: if isAdmin() || (inChat(id) && (resource.data.assignee == me() || resource.data.leader == me()));
+        allow create: if (isAdmin() || (inChat(id) && leads(request.resource.data.assignee)))
+          && request.resource.data.keys().hasOnly(taskKeys())
+          && request.resource.data.leader == me() && request.resource.data.assignee != me()
+          && request.resource.data.assignee in chatDoc(id).members
+          && request.resource.data.status == 'new' && request.resource.data.num is int
+          && taskTextOk(request.resource.data);
+        // the employee moves their own task forward only: New → In progress → Finished (never back)
+        allow update: if inChat(id) && resource.data.assignee == me()
+          && onlyChanged(['status', 'updatedAt', 'doneAt', 'doneNote', 'history'])
+          && ((resource.data.status == 'new' && request.resource.data.status in ['in_progress', 'done'])
+            || (resource.data.status == 'in_progress' && request.resource.data.status == 'done'))
+          && request.resource.data.history.size() == resource.data.get('history', []).size() + 1
+          && taskTextOk(request.resource.data);
+        // the leader who gave it (and system admins): any move — incl. Finished → In progress — and edit the text
+        allow update: if (isAdmin() || (inChat(id) && resource.data.leader == me()))
+          && request.resource.data.leader == resource.data.leader && request.resource.data.assignee == resource.data.assignee
+          && request.resource.data.num == resource.data.num
+          && request.resource.data.status in ['new', 'in_progress', 'done']
+          && taskTextOk(request.resource.data);
+        allow delete: if isAdmin() || (inChat(id) && resource.data.leader == me());
       }
     }
     match /chat_archive/{id} {
