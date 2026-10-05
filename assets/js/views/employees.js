@@ -9,6 +9,7 @@ import { getBalance, adjustBalance, remaining, emptyBalance, balanceId } from '.
 import { personMonthView } from './attendance.js';
 import { publicConfig, toLogin, callService } from '../services/authsvc.js';
 import { renameAccount, renameStepText } from '../services/rename.js';
+import { setTabLabel } from '../tabs.js';
 import { forceLogout, LEADER_ROLES } from '../core/session.js';
 import { balanceTable } from './profile.js';
 import { PARTS, partLabel, salaryParts, rulesOf } from '../services/salary.js';
@@ -405,6 +406,7 @@ export async function openEditor(email) {
 async function renderFile(root, email) {
   const u = person(email) || await read('users', email);
   if (!u) { root.innerHTML = `<div class="card">${empty('fa-user-slash', L('الموظف مش موجود', 'Employee not found'))}</div>`; return; }
+  setTabLabel(u.name || email);
   const year = new Date(now()).getFullYear();
   root.innerHTML = `
     <a href="#/employees" class="btn btn-ghost btn-sm mb-16"><i class="fas fa-arrow-right" data-flip></i> ${L('كل الموظفين', 'All employees')}</a>

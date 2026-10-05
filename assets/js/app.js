@@ -8,6 +8,7 @@ import { startDirectory } from './services/directory.js';
 import { startNotifications, onNotifications, unreadCount } from './services/notify.js';
 import { watchInbox } from './services/requests.js';
 import { auth, updatePassword, updateDoc, ref, read, isQuotaError, toMs } from './core/fb.js';
+import { initTabs, enterTab, restoreScroll } from './tabs.js';
 
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
@@ -126,7 +127,9 @@ async function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'home';
   const [id, ...rest] = hash.split('/');
   let r = ROUTES.find(x => x.id === id);
-  if (!r || !allowed(r)) r = ROUTES[0];
+  const fallback = !r || !allowed(r);
+  if (fallback) r = ROUTES[0];
+  const restoreY = enterTab(r, fallback ? `#/${r.id}` : `#/${hash}`);
   document.body.classList.remove('nav-open');
   document.querySelectorAll('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === r.id));
   byId('page-title').textContent = L(r.ar, r.en);
@@ -151,6 +154,7 @@ async function route() {
   }
   view.focus({ preventScroll: true });
   window.scrollTo(0, 0);
+  restoreScroll(restoreY); // reopened from its tab → back to where you were
 }
 
 function startClock() {
@@ -235,6 +239,8 @@ async function boot() {
   if (canApprove()) watchInbox(rows => { inboxCount = rows.length; setBadges(); });
   renderNav();
   startClock();
+  initTabs(ROUTES, allowed);
+  window.addEventListener('am:tabs-drawn', setBadges);
   window.addEventListener('hashchange', route);
   await route();
   const s = byId('splash'); s.style.opacity = '0'; setTimeout(() => s.remove(), 300);

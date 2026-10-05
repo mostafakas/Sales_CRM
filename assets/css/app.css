@@ -162,6 +162,55 @@ p { margin: 0; }
 .page-head p { color: var(--muted); margin-top: 4px; }
 .scrim { display: none; }
 
+/* ---------- top tabs (desktop) ---------- */
+.tabbar { display: flex; align-items: flex-end; gap: 2px; padding: 6px 20px 0; background: var(--surface-2); border-bottom: 1px solid var(--border);
+  position: sticky; top: var(--topbar-h); z-index: 29; overflow-x: auto; scrollbar-width: none; min-height: 43px; }
+.tabbar::-webkit-scrollbar { display: none; }
+.tab { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 10px 10px 0 0;
+  color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; user-select: none; flex-shrink: 0; max-width: 240px; position: relative; }
+.tab:hover { background: var(--surface); color: var(--text); }
+.tab.on { background: var(--bg); color: var(--brand); border-color: var(--border); margin-bottom: -1px; height: 37px; }
+.tab.on::before { content: ''; position: absolute; top: -1px; inset-inline: 10px; height: 3px; border-radius: 0 0 3px 3px; background: var(--brand); }
+.tab.pinned { padding: 0 11px; }
+.tab > i { font-size: 13px; }
+.tab-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tab-name small { font-weight: 600; color: var(--muted); font-size: 12px; }
+.tab .badge-count { font-size: 10px; min-width: 17px; height: 17px; }
+.tab.pinned .badge-count { position: absolute; top: 3px; inset-inline-end: 1px; }
+.tab-x { border: 0; background: none; color: inherit; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; cursor: pointer; opacity: .55; font-size: 11px; margin-inline-start: 2px; }
+.tab-x:hover { opacity: 1; background: var(--surface-2); color: var(--bad); }
+.tab.dragging { opacity: .4; }
+.tab-menu { position: fixed; z-index: 90; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 4px; min-width: 200px; }
+.tab-menu button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); text-align: start; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.tab-menu button:hover { background: var(--surface-2); }
+.tab-menu i { width: 16px; color: var(--muted); }
+.brand-mark { display: none; }
+
+/* ---------- icon sidebar that opens while the mouse is on it (desktop) ---------- */
+@media (min-width: 961px) and (hover: hover) {
+  :root { --rail-w: 72px; }
+  .sidebar { position: fixed; inset-block: 0; inset-inline-start: 0; width: var(--rail-w); overflow: hidden; transition: width .18s ease, box-shadow .18s ease; }
+  .sidebar:hover, .sidebar:focus-within { width: var(--sidebar-w); box-shadow: 0 0 40px rgba(7,10,36,.45); }
+  .main { margin-inline-start: var(--rail-w); }
+  .sidebar-brand { padding: 0 20px; }
+  .brand-mark { height: 26px; width: auto; }
+  .sidebar:not(:hover):not(:focus-within) .brand-full { display: none; }
+  .sidebar:not(:hover):not(:focus-within) .brand-mark { display: block; }
+  .sidebar-nav { overflow-x: hidden; padding-inline: 12px; }
+  .nav-item { white-space: nowrap; position: relative; padding: 10px 14px; }
+  .nav-item i { flex-shrink: 0; }
+  .nav-item span:not(.badge-count), .nav-label, .user-chip .who, .user-chip .btn { transition: opacity .15s ease; }
+  .sidebar:not(:hover):not(:focus-within) .nav-item span:not(.badge-count),
+  .sidebar:not(:hover):not(:focus-within) .nav-label,
+  .sidebar:not(:hover):not(:focus-within) .user-chip .who,
+  .sidebar:not(:hover):not(:focus-within) .user-chip .btn { opacity: 0; }
+  .sidebar:not(:hover):not(:focus-within) .nav-item .badge-count { position: absolute; top: 3px; inset-inline-start: 26px; font-size: 9.5px; min-width: 16px; height: 16px; }
+  .sidebar-foot { padding: 14px 10px; }
+  .user-chip { white-space: nowrap; }
+}
+@media (max-width: 960px) { .tabbar { display: none; } }
+@media print { .tabbar { display: none; } }
+
 @media (max-width: 960px) {
   .sidebar { position: fixed; inset-block: 0; inset-inline-start: 0; transform: translateX(100%); transition: transform .25s ease; }
   html[dir="ltr"] .sidebar { transform: translateX(-100%); }
@@ -604,7 +653,7 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .act-time { width: 64px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
 
 /* ---------- chat ---------- */
-.chat-app { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; height: calc(100dvh - var(--topbar-h) - 52px); min-height: 460px; margin: -8px 0 -40px; }
+.chat-app { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; height: calc(100dvh - var(--topbar-h) - 43px - 52px); min-height: 460px; margin: -8px 0 -40px; } /* 43px = the tab bar */
 .chat-side { display: flex; flex-direction: column; min-height: 0; overflow: visible; }
 .chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 16px 10px; }
 .chat-side-head h2 { font-size: 18px; font-weight: 800; }

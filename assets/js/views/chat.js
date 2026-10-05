@@ -13,6 +13,7 @@ import {
   editMessage, deleteMessage, mentionedMe
 } from '../services/chat.js';
 import { mountTasks } from './chat-tasks.js';
+import { setTabLabel } from '../tabs.js';
 
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 const fmtLen = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.floor((s || 0) % 60)).padStart(2, '0')}`;
@@ -215,6 +216,7 @@ export default async function render(root, { params }) {
 
   // ---------- thread ----------
   function emptyThread() {
+    setTabLabel('');
     $('#thread').innerHTML = `<div class="chat-empty">${empty('fa-comments', L('اختار محادثة', 'Pick a conversation'), L('أو ابدأ واحدة جديدة مع أي زميل.', 'Or start a new one with any colleague.'))}</div>`;
   }
   function headHTML() {
@@ -243,6 +245,7 @@ export default async function render(root, { params }) {
     if (openChat && !admin && !(openChat.members || []).includes(session.email)) openChat = null; // not (or no longer) a member
     if (!openChat) { $('#thread').innerHTML = `<div class="chat-empty">${empty('fa-lock', L('المحادثة مش متاحة', 'Conversation not available'))}</div>`; return; }
     drawList();
+    setTabLabel(convTitle(openChat));
     const member = openChat.members.includes(session.email);
     $('#thread').innerHTML = `
       <header class="chat-head">
