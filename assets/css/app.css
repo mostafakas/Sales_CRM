@@ -217,12 +217,14 @@ p { margin: 0; }
   .sidebar:not(:hover):not(:focus-within) .brand-full { display: none; }
   .sidebar:not(:hover):not(:focus-within) .brand-mark { display: block; }
   /* compact, no scrollbar: the whole menu fits; on very short screens it still scrolls with the wheel */
-  .sidebar-nav { overflow-x: hidden; padding: 6px 12px; scrollbar-width: none; }
+  /* the menu stretches over the full height of the screen: items grow (up to 50px) instead of leaving a gap at the
+     bottom, and shrink (down to 30px) on short screens; only a very short screen scrolls, without a visible bar */
+  .sidebar-nav { overflow-x: hidden; padding: 8px 12px; scrollbar-width: none; display: flex; flex-direction: column; }
   .sidebar-nav::-webkit-scrollbar { display: none; }
-  .nav-group, .nav-group:first-child { margin-top: 0; }
-  .nav-label { height: 15px; padding: 0 14px; display: flex; align-items: center; font-size: 10px; line-height: 1; white-space: nowrap; overflow: hidden; position: relative; }
+  .nav-group { display: contents; }
+  .nav-label { flex: 1 1 15px; min-height: 15px; max-height: 30px; padding: 0 14px; display: flex; align-items: center; font-size: 10.5px; line-height: 1; white-space: nowrap; overflow: hidden; position: relative; }
   .nav-group:first-child .nav-label { display: none; }
-  .nav-item { white-space: nowrap; position: relative; height: 30px; padding: 0 14px; gap: 14px; margin: 0; border-radius: 9px; }
+  .nav-item { white-space: nowrap; position: relative; flex: 2 1 30px; min-height: 30px; max-height: 50px; height: auto; padding: 0 14px; gap: 14px; margin: 1px 0; border-radius: 10px; }
   .nav-item i { flex-shrink: 0; font-size: 16px; width: 20px; }
   .nav-item span:not(.badge-count), .nav-label, .user-chip .who, .user-chip .btn { transition: opacity .15s ease; }
   .sidebar:not(:hover):not(:focus-within) .nav-item span:not(.badge-count),
