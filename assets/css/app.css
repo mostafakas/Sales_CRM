@@ -726,7 +726,6 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .ct-lane.new .ct-lane-head { color: var(--brand); } .ct-lane.inprog .ct-lane-head { color: #b54708; } .ct-lane.done .ct-lane-head { color: #067647; }
 .ct-lane-head .num { background: var(--surface); border-radius: 999px; padding: 0 7px; font-size: 11px; }
 .ct-lane-body { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; }
-.ct-lane-all .ct-lane-body { max-height: none; }
 .ct-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px; cursor: pointer; }
 .ct-card:hover { border-color: var(--border-strong); }
 .ct-card.late { border-color: var(--bad); }
@@ -745,7 +744,8 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .ct-btn.back:hover { background: var(--bad-bg); }
 .ct-doneat { font-size: 11px; color: #067647; font-weight: 700; }
 .ct-none { font-size: 12px; color: var(--faint); text-align: center; padding: 6px; }
-.ct-more { border: 0; background: var(--surface); color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; border-radius: 8px; padding: 4px; cursor: pointer; }
+.ct-day { display: inline-flex; align-items: center; gap: 2px; }
+.ct-day .input { height: 32px; font-size: 12.5px; padding-block: 0; width: 140px; }
 .ct-badge { display: inline-flex; align-items: center; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px; }
 .ct-badge.new { background: var(--brand-soft); color: var(--brand); } .ct-badge.inprog { background: var(--warn-bg); color: #b54708; } .ct-badge.done { background: var(--ok-bg); color: #067647; }
 .ct-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

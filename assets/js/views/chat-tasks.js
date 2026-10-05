@@ -1,16 +1,21 @@
 // The tasks area at the top of a group chat: three coloured lanes (New / In progress / Finished) with my tasks
 // (a leader sees the tasks they gave), the leader's "New task" dialog, and the task details.
+// Finished shows the tasks finished on the current work day only (it ends at 04:00, like attendance); older ones
+// are archived and come back when you pick their date. Open tasks are never archived.
 import { L, esc, fmtDate, fmtTime, ymd, debounce } from '../core/utils.js';
 import { toast, toastErr, avatar, modal, busy, confirmDialog } from '../core/ui.js';
 import { session, now } from '../core/session.js';
 import { person, nameOf } from '../services/directory.js';
 import { toMs } from '../core/fb.js';
+import { dayKey } from '../core/policy.js';
 import {
   TASK_STATUS, TASK_ORDER, watchTasks, assignableIn, canCreateTasks, isTaskLeader, canMove, createTasks, moveTask, editTask, deleteTask, isLate, doneAtMs
 } from '../services/tasks.js';
 
 const LS_OPEN = 'am_tasks_open';
-const FINISHED_SHOWN = 3;
+const shiftDay = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+/** the work day a task was finished on (a finish still on its way counts as now) */
+const doneDay = (t) => dayKey(doneAtMs(t) || now());
 const who = (e) => person(e) || { email: e, name: nameOf(e) };
 const first = (e) => String(nameOf(e) || '').split(' ')[0];
 const dueText = (t) => {
@@ -27,11 +32,16 @@ const stamp = (ms) => ms ? esc(ymd(ms) === ymd(now()) ? fmtTime(ms) : `${fmtDate
  */
 export function mountTasks(host, { getChat, getMsgs, jumpTo }) {
   let tasks = [], filter = '', pendingOpen = '', un = null;
+  let day = '';                                   // '' = today; else the archived day being viewed
+  const today = () => dayKey(now());
+  const viewDay = () => day || today();
+  let shownToday = today();
+  const tick = setInterval(() => { if (!day && today() !== shownToday) draw(); }, 60000); // 04:00 → archive yesterday's
   let open = (() => { try { const v = localStorage.getItem(LS_OPEN); return v == null ? window.innerWidth > 900 : v === '1'; } catch { return true; } })();
 
   function start(chat) {
     if (un) { un(); un = null; }
-    tasks = []; filter = '';
+    tasks = []; filter = ''; day = '';
     draw();
     un = watchTasks(chat.id, rows => {
       tasks = rows; draw();
@@ -63,16 +73,17 @@ export function mountTasks(host, { getChat, getMsgs, jumpTo }) {
     const can = canCreateTasks(chat);
     if (!tasks.length && !can) { host.innerHTML = ''; host.classList.add('hidden'); return; }
     host.classList.remove('hidden');
+    shownToday = today();
+    const vd = viewDay(), past = vd !== shownToday;
     const rows = visible();
-    const by = (s) => rows.filter(t => t.status === s);
+    const by = (s) => rows.filter(t => t.status === s && (s !== 'done' || doneDay(t) === vd));
     const lanes = TASK_ORDER.map(s => {
       let list = by(s);
       if (s === 'done') list = list.sort((a, b) => doneAtMs(b) - doneAtMs(a));
       else list = list.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999') || a.num - b.num);
-      const shown = s === 'done' ? list.slice(0, FINISHED_SHOWN) : list;
-      return `<div class="ct-lane ${TASK_STATUS[s].cls}"><div class="ct-lane-head">${TASK_STATUS[s].label} <span class="num">${list.length}</span></div>
-        <div class="ct-lane-body">${shown.map(card).join('') || `<div class="ct-none">${L('مفيش', 'None')}</div>`}
-        ${list.length > shown.length ? `<button class="ct-more" data-allfinished>+${list.length - shown.length} ${L('كمان', 'more')}</button>` : ''}</div></div>`;
+      const none = s === 'done' && past ? L('مفيش تاسكات خلصت اليوم ده', 'Nothing was finished that day') : L('مفيش', 'None');
+      return `<div class="ct-lane ${TASK_STATUS[s].cls}"><div class="ct-lane-head">${TASK_STATUS[s].label}${s === 'done' && past ? ` · ${esc(fmtDate(vd))}` : ''} <span class="num">${list.length}</span></div>
+        <div class="ct-lane-body">${list.map(card).join('') || `<div class="ct-none">${none}</div>`}</div></div>`;
     }).join('');
     const counts = TASK_ORDER.map(s => `<span class="ct-dot ${TASK_STATUS[s].cls}"></span>${by(s).length}`).join(' ');
     const people = [...new Set(tasks.map(t => t.assignee))];
@@ -80,7 +91,13 @@ export function mountTasks(host, { getChat, getMsgs, jumpTo }) {
     host.innerHTML = `
       <div class="ct-head">
         <button class="ct-toggle" id="ct-toggle" aria-expanded="${open}"><i class="fas fa-chevron-${open ? 'up' : 'down'}"></i> <b>${L('التاسكات', 'Tasks')}</b> <span class="ct-counts num">${counts}</span></button>
-        <div class="row gap-8">
+        <div class="row gap-8 wrap">
+          <div class="ct-day" title="${L('التاسكات المنتهية في يوم معيّن', 'Tasks finished on a given day')}">
+            <button class="btn btn-ghost btn-icon btn-sm" data-day="-1" aria-label="${L('اليوم اللي قبله', 'Previous day')}"><i class="fas fa-chevron-right" data-flip></i></button>
+            <input class="input" type="date" id="ct-day" max="${shownToday}" value="${vd}">
+            <button class="btn btn-ghost btn-icon btn-sm" data-day="1" aria-label="${L('اليوم اللي بعده', 'Next day')}" ${past ? '' : 'disabled'}><i class="fas fa-chevron-left" data-flip></i></button>
+            ${past ? `<button class="btn btn-soft btn-sm" data-day="0">${L('النهارده', 'Today')}</button>` : ''}
+          </div>
           ${showFilter ? `<select class="select select-sm" id="ct-filter"><option value="">${L('كل الموظفين', 'Everyone')}</option>${tasks.some(t => t.assignee === session.email) ? `<option value="__me" ${filter === '__me' ? 'selected' : ''}>${L('تاسكاتي أنا', 'My tasks')}</option>` : ''}${people.filter(e => e !== session.email).sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ar')).map(e => `<option value="${esc(e)}" ${filter === e ? 'selected' : ''}>${esc(nameOf(e))}</option>`).join('')}</select>` : ''}
           ${can ? `<button class="btn btn-primary btn-sm" id="ct-new"><i class="fas fa-plus"></i> ${L('تاسك جديد', 'New task')}</button>` : ''}
         </div>
@@ -88,11 +105,16 @@ export function mountTasks(host, { getChat, getMsgs, jumpTo }) {
       ${open ? `<div class="ct-lanes">${lanes}</div>` : ''}`;
   }
 
-  host.addEventListener('change', (e) => { if (e.target.id === 'ct-filter') { filter = e.target.value; draw(); } });
+  const goDay = (d) => { day = !d || d >= today() ? '' : d; draw(); };
+  host.addEventListener('change', (e) => {
+    if (e.target.id === 'ct-filter') { filter = e.target.value; draw(); }
+    if (e.target.id === 'ct-day') goDay(e.target.value);
+  });
   host.addEventListener('click', async (e) => {
     if (e.target.closest('#ct-toggle')) { open = !open; try { localStorage.setItem(LS_OPEN, open ? '1' : '0'); } catch {} draw(); return; }
     if (e.target.closest('#ct-new')) { editor(null); return; }
-    if (e.target.closest('[data-allfinished]')) { allFinished(); return; }
+    const dn = e.target.closest('[data-day]');
+    if (dn) { const n = Number(dn.dataset.day); goDay(n ? shiftDay(viewDay(), n) : ''); if (!open) { open = true; draw(); } return; }
     const mv = e.target.closest('[data-mv]');
     if (mv) { e.stopPropagation(); const t = tasks.find(x => x.id === mv.dataset.t); if (t) move(t, mv.dataset.mv, mv); return; }
     const c = e.target.closest('[data-open]');
@@ -195,21 +217,11 @@ export function mountTasks(host, { getChat, getMsgs, jumpTo }) {
     };
   }
 
-  function allFinished() {
-    const list = visible().filter(t => t.status === 'done').sort((a, b) => doneAtMs(b) - doneAtMs(a));
-    const m = modal({ title: L(`التاسكات المنتهية (${list.length})`, `Finished tasks (${list.length})`), icon: 'fa-circle-check', size: 'narrow', body: `<div class="ct-lane done ct-lane-all"><div class="ct-lane-body">${list.map(card).join('')}</div></div>`, foot: `<button class="btn btn-primary" data-close>${L('تمام', 'OK')}</button>` });
-    m.el.addEventListener('click', async (e) => {
-      const mv = e.target.closest('[data-mv]');
-      if (mv) { e.stopPropagation(); const t = tasks.find(x => x.id === mv.dataset.t); if (t && await move(t, mv.dataset.mv, mv)) m.close(); return; }
-      const c = e.target.closest('[data-open]'); if (c) { const t = tasks.find(x => x.id === c.dataset.open); if (t) { m.close(); details(t); } }
-    });
-  }
-
   return {
     start,
     redraw: draw,
     list: () => tasks,
     open(id) { const t = tasks.find(x => x.id === id); if (t) details(t); else pendingOpen = id; },
-    destroy() { if (un) { un(); un = null; } host.innerHTML = ''; }
+    destroy() { if (un) { un(); un = null; } clearInterval(tick); host.innerHTML = ''; }
   };
 }
