@@ -151,6 +151,13 @@ export function planFor(dateStr, schedule, who) {
   return { mode: 'office', start: h.start, end: h.end, grace: h.grace, source: 'default' };
 }
 export const isWorkingPlan = (p) => p.mode === 'office' || p.mode === 'remote' || p.mode === 'mission';
+/**
+ * The later shift: someone planned for 09:00 who starts after the grace period may choose to work 10:00–19:00
+ * that day instead of being counted late. The choice is stored on the day (users.shift / attendance_days.shift).
+ */
+export const LATE_SHIFT = { id: '10', from: '09:00', start: '10:00', end: '19:00' };
+export const canPickLateShift = (plan) => !!plan && isWorkingPlan(plan) && plan.start === LATE_SHIFT.from;
+export const withShift = (plan, shift) => shift === LATE_SHIFT.id && canPickLateShift(plan) ? { ...plan, start: LATE_SHIFT.start, end: LATE_SHIFT.end, shift: LATE_SHIFT.id } : plan;
 
 /** Count working days in a range (excludes weekends & holidays; schedule overrides respected) */
 export function workingDays(from, to, schedulesByMonth = {}) {
@@ -165,7 +172,8 @@ export function lateness(checkInMs, plan) {
   if (!checkInMs) return { late: 0, raw: 0 };
   if (plan && !isWorkingPlan(plan)) return { late: 0, raw: 0 };
   const start = hmToMin((plan && plan.start) || policy.workStart);
-  const rawMin = Math.max(0, Math.round(minutesOfDay(checkInMs) - start));
+  // whole minutes: with a 30-minute grace, 09:30:59 is still on time and 09:31 is 31 minutes late
+  const rawMin = Math.max(0, Math.floor(minutesOfDay(checkInMs) - start));
   const grace = plan && plan.grace !== undefined ? plan.grace : (policy.graceMinutes || 0);
   return { late: rawMin > grace ? rawMin : 0, raw: rawMin };
 }

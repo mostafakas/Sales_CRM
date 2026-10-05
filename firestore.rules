@@ -117,7 +117,7 @@ service cloud.firestore {
       allow update: if signedIn() && email == me()
         && resource.data.get('isSuspended', false) != true
         && onlyChanged(['status', 'lastChange', 'lastChangeClient', 'timeBank', 'firstOnlineAt', 'dayKey', 'workLocation',
-                        'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword'])
+                        'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword', 'shift'])
         && (!('status' in affected()) || request.resource.data.status in ['Online', 'Break', 'Meeting', 'Offline'])
         && (!('dayKey' in affected()) || request.resource.data.dayKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
         && (!('lastChange' in affected()) || request.resource.data.lastChange == request.time)
@@ -127,6 +127,8 @@ service cloud.firestore {
         // work location and the "remote without approval" flag are set once, when the day starts
         && (!('workLocation' in affected()) || newDay() || resource.data.get('workLocation', null) == null)
         && (!('remotePending' in affected()) || newDay() || request.resource.data.remotePending == true)
+        // the 10:00 shift is chosen once, when the day starts
+        && (!('shift' in affected()) || (newDay() && request.resource.data.shift in ['', '10']))
         && (!('photo' in affected()) || (request.resource.data.photo is string && request.resource.data.photo.size() < 120000))
         && (!('sessionId' in affected()) || (request.resource.data.sessionId is string && request.resource.data.sessionId.size() < 64))
         && timeBankOk();
@@ -161,8 +163,9 @@ service cloud.firestore {
     match /attendance_days/{id} {
       function selfKeys() {
         return ['email', 'name', 'date', 'leaderEmail', 'department', 'mode', 'remotePending', 'checkIn', 'checkInMs', 'checkOutMs',
-                'workMs', 'breakMs', 'meetingMs', 'closed', 'closedBy', 'autoClosed', 'corrected', 'updatedAt', 'creditMs'];
+                'workMs', 'breakMs', 'meetingMs', 'closed', 'closedBy', 'autoClosed', 'corrected', 'updatedAt', 'creditMs', 'shift'];
       }
+      function shiftOk(d) { return d.get('shift', '') in ['', '10']; }
       function creditOk(d) { return d.get('creditMs', 0) is number && d.get('creditMs', 0) >= 0 && d.get('creditMs', 0) <= graceMs(); }
       function checkOutOk(d) {
         return d.get('checkOutMs', null) == null
@@ -178,6 +181,7 @@ service cloud.firestore {
       // self create (start of day, or closing a forgotten day)
       allow create: if active() && request.resource.data.email == me() && id == me() + '_' + request.resource.data.date
         && request.resource.data.keys().hasOnly(selfKeys())
+        && shiftOk(request.resource.data)
         && request.resource.data.get('corrected', false) == false
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
         && creditOk(request.resource.data)
@@ -197,6 +201,7 @@ service cloud.firestore {
         && resource.data.get('email', me()) == me() && request.resource.data.email == me()
         && resource.data.get('checkIn', null) == null
         && onlyChanged(selfKeys())
+        && shiftOk(request.resource.data)
         && request.resource.data.get('closedBy', '') in ['', 'user', 'auto']
         && creditOk(request.resource.data)
         && (!('checkIn' in affected()) || (request.resource.data.checkIn == request.time && dayWindowOk(request.resource.data.date)))

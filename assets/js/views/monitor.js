@@ -2,7 +2,7 @@
 import { L, esc, fmtDur, fmtTime, fmtMin, fmtHours, num, debounce, hmToMin, ymd } from '../core/utils.js';
 import { toast, toastErr, avatar, STATUS_META, empty, confirmDialog, bindActions, modal } from '../core/ui.js';
 import { session, now, isHR, seesAll } from '../core/session.js';
-import { dayKey, planFor, lateness, modeLabel, roleLabel, isWorkingPlan, policy, leaveType } from '../core/policy.js';
+import { dayKey, planFor, lateness, modeLabel, roleLabel, isWorkingPlan, policy, leaveType, withShift } from '../core/policy.js';
 import { toMs, list, query, col, where } from '../core/fb.js';
 import { onDirectory, managedPeople, departments } from '../services/directory.js';
 import { liveBank, staleDay, closeStaleDay, changeStatus, resetLive, COUNTED } from '../services/attendance.js';
@@ -67,7 +67,7 @@ export default async function render(root) {
   const info = (u) => {
     const t = today();
     const isToday = u.dayKey === t;
-    const plan = planFor(t, schedules[u.email] || null, u);
+    const plan = withShift(planFor(t, schedules[u.email] || null, u), isToday ? u.shift : '');
     const on = isToday && u.status && u.status !== 'Offline';
     const fo0 = isToday ? toMs(u.firstOnlineAt) : null;
     const fo = fo0 && dayKey(fo0) === t ? fo0 : null; // a check-in from another day (wrong device clock) is ignored
@@ -145,6 +145,7 @@ export default async function render(root) {
     return `<span class="badge ${s.cls} ${live}"><span class="dot"></span>${esc(L(s.ar, s.en))}</span>${sub ? `<small class="sub">${esc(sub)}</small>` : ''}`;
   };
   const flags = (i) => [
+    i.plan.shift && (i.on || i.fo) ? `<span class="badge info"><i class="fas fa-clock-rotate-left"></i>${L('شيفت 10', '10:00 shift')}</span>` : '',
     i.late ? `<span class="badge bad">${L('تأخير', 'Late')} ${esc(fmtMin(i.late))}</span>` : '',
     i.pending ? `<span class="badge warn"><i class="fas fa-circle-exclamation"></i>${L('أونلاين بدون موافقة', 'Remote not approved')}</span>` : '',
     i.stale ? `<span class="badge bad"><i class="fas fa-triangle-exclamation"></i>${L('يوم مفتوح', 'Open day')} <span class="num">${esc(i.stale)}</span></span>` : ''
@@ -229,7 +230,7 @@ export default async function render(root) {
       const bank = liveBank(u);
       bank.Total = bankTotal(bank);
       root.querySelectorAll(`[data-live^="${CSS.escape(u.email)}|"]`).forEach(el => { el.textContent = fmtDur(bank[el.dataset.live.split('|')[1]]); });
-      const w = segWidths(bank, planMs(planFor(t, schedules[u.email] || null, u)));
+      const w = segWidths(bank, planMs(withShift(planFor(t, schedules[u.email] || null, u), u.shift)));
       SEGS.forEach((k, n) => { const s = root.querySelector(`[data-seg="${CSS.escape(u.email)}|${k}"]`); if (s) s.style.width = w[n] + '%'; });
     });
   }
@@ -249,7 +250,7 @@ export default async function render(root) {
       const u = managedPeople().find(p => p.email === email); if (!u) return;
       const d = u.dayKey || today();
       const b = liveBank(u);
-      const row = classifyDay(d, planFor(d, schedules[email] || null, email), { checkInMs: toMs(u.firstOnlineAt), mode: u.workLocation, workMs: b.Online, breakMs: b.Break, meetingMs: b.Meeting }, [], today());
+      const row = classifyDay(d, planFor(d, schedules[email] || null, email), { checkInMs: toMs(u.firstOnlineAt), mode: u.workLocation, shift: u.shift, workMs: b.Online, breakMs: b.Break, meetingMs: b.Meeting }, [], today());
       showDayDetails(email, row);
     },
     manage: ({ email }) => {

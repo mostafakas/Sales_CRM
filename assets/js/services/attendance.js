@@ -4,7 +4,7 @@ import {
   db, doc, col, writeBatch, serverTimestamp, toMs, read, list, query, where, addDoc, getDoc, setDoc, listF
 } from '../core/fb.js';
 import { session, now, isHR, seesAll, isFinance, syncClock } from '../core/session.js';
-import { policy, dayKey, planFor, isWorkingPlan } from '../core/policy.js';
+import { policy, dayKey, planFor, withShift, LATE_SHIFT } from '../core/policy.js';
 import { cairoMs, addDays, L } from '../core/utils.js';
 import { userError } from '../core/ui.js';
 
@@ -53,7 +53,7 @@ export async function closeStaleDay(email, u, by = session.email) {
   window.dispatchEvent(new Event('am:data-changed'));
   const key = u.dayKey;
   const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
-  const plan = planFor(key, sched, email);
+  const plan = withShift(planFor(key, sched, email), u.shift);
   const endCap = cairoMs(key, plan.end || policy.workEnd);
   const bank = { ...zeroBank(), ...(u.timeBank || {}) };
   const last = toMs(u.lastChange) || endCap;
@@ -73,8 +73,9 @@ export async function closeStaleDay(email, u, by = session.email) {
   await b.commit();
 }
 
-/** Start (or resume) today. mode: 'office' | 'remote' */
-export async function startDay(mode, { remoteApproved = true } = {}) {
+/** Start (or resume) today. mode: 'office' | 'remote'; shift: '10' = the later 10:00–19:00 shift (new day only) */
+export async function startDay(mode, { remoteApproved = true, shift = '' } = {}) {
+  const sh = shift === LATE_SHIFT.id ? LATE_SHIFT.id : '';
   window.dispatchEvent(new Event('am:data-changed'));
   const email = session.email;
   let u = await read('users', email);
@@ -101,16 +102,15 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
       // closedBy goes back to '' — a day ended by HR/the leader must stay resumable by its owner
       b.update(dayRef, { closed: false, closedBy: '', checkOutMs: null, updatedAt: serverTimestamp() });
     } else {
-      // checking in within the grace period: not late, and the minutes since the start of the shift count as work
-      const credit = await graceCredit(email, key, at);
+      // the work time counts from the moment the day starts (the grace period only spares the lateness)
       b.update(doc(db, 'users', email), {
-        status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: { ...zeroBank(), Online: credit },
-        dayKey: key, checkedOut: false, workLocation: mode, remotePending: mode === 'remote' && !remoteApproved, firstOnlineAt: serverTimestamp()
+        status: 'Online', lastChange: serverTimestamp(), lastChangeClient: Date.now(), timeBank: zeroBank(),
+        dayKey: key, checkedOut: false, workLocation: mode, remotePending: mode === 'remote' && !remoteApproved, firstOnlineAt: serverTimestamp(), shift: sh
       });
       b.set(dayRef, {
         email, name: u.name || email, date: key, leaderEmail: u.leaderEmail || '', department: u.department || '',
-        mode, remotePending: mode === 'remote' && !remoteApproved,
-        checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: credit, creditMs: credit, breakMs: 0, meetingMs: 0,
+        mode, remotePending: mode === 'remote' && !remoteApproved, shift: sh,
+        checkIn: serverTimestamp(), checkInMs: at, checkOutMs: null, workMs: 0, breakMs: 0, meetingMs: 0,
         closed: false, closedBy: '', autoClosed: false, corrected: false, updatedAt: serverTimestamp()
       }, { merge: true });
     }
@@ -130,16 +130,6 @@ export async function startDay(mode, { remoteApproved = true } = {}) {
       throw withDiag(e2, u, rec);
     }
   }
-}
-
-/** ms between the planned start and a check-in that falls inside the grace period (0 otherwise) */
-async function graceCredit(email, key, at) {
-  const sched = await read('schedules', `${email}_${key.slice(0, 7)}`).catch(() => null);
-  const plan = planFor(key, sched, email);
-  if (!isWorkingPlan(plan) || !plan.start) return 0;
-  const since = at - cairoMs(key, plan.start);
-  const grace = plan.grace !== undefined ? plan.grace : (Number(policy.graceMinutes) || 0);
-  return since > 0 && since <= grace * 60000 ? Math.round(since) : 0;
 }
 
 /** Short technical note shown with the error, so a screenshot tells us what was rejected */

@@ -2,7 +2,7 @@
 import { L, esc, fmtDur, fmtTime, fmtHours, fmtMin, ymd, addDays, fmtDate, num, zparts } from '../core/utils.js';
 import { toast, toastErr, modal, avatar, presenceBadge, STATUS_META, busy, confirmDialog, empty, livePop } from '../core/ui.js';
 import { session, now } from '../core/session.js';
-import { policy, dayKey, planFor, lateness, modeLabel, MODE_META, typeLabel, statusLabel, REQUEST_STATUS, leaveTypeLabel, isWorkingPlan } from '../core/policy.js';
+import { policy, dayKey, planFor, lateness, modeLabel, MODE_META, typeLabel, statusLabel, REQUEST_STATUS, leaveTypeLabel, isWorkingPlan, withShift, canPickLateShift, LATE_SHIFT } from '../core/policy.js';
 import { toMs, watch, query, col, where } from '../core/fb.js';
 import { startDay, changeStatus, endDay, liveBank, staleDay, closeStaleDay, dayLogs, COUNTED } from '../services/attendance.js';
 import { getSchedule, watchBalance, remaining, watchMyRequests } from '../services/requests.js';
@@ -38,7 +38,7 @@ export default async function render(root) {
     const p = u();
     const st = started() ? p.status : 'Offline';
     const meta = STATUS_META[st] || STATUS_META.Offline;
-    const plan = planFor(today(), schedule, session.email);
+    const plan = withShift(planFor(today(), schedule, session.email), p.dayKey === today() ? p.shift : '');
     const h = zparts(now()).h;
     const greet = h < 12 ? L('صباح الخير', 'Good morning') : (h < 17 ? L('مساء الخير', 'Good afternoon') : L('مساء النور', 'Good evening'));
     const fo0 = p.dayKey === today() ? toMs(p.firstOnlineAt) : null;
@@ -56,6 +56,7 @@ export default async function render(root) {
             ${p.dayKey === today() && p.workLocation ? `<span class="badge brand"><i class="fas ${p.workLocation === 'remote' ? 'fa-house-laptop' : 'fa-building'}"></i>${esc(modeLabel(p.workLocation))}</span>` : ''}
             ${p.remotePending && p.dayKey === today() ? `<span class="badge warn"><i class="fas fa-hourglass-half"></i>${L('الأونلاين مستني موافقة', 'Remote pending approval')}</span>` : ''}
             ${fo ? `<span class="badge"><i class="fas fa-right-to-bracket"></i>${L('حضور', 'In')} ${esc(fmtTime(fo))}</span>` : ''}
+            ${plan.shift && fo ? `<span class="badge info"><i class="fas fa-clock-rotate-left"></i>${L('شيفت 10', '10:00 shift')}</span>` : ''}
             ${late.late ? `<span class="badge bad"><i class="fas fa-clock"></i>${L('تأخير', 'Late')} ${esc(fmtMin(late.late))}</span>` : ''}
           </div>
         </div>
@@ -128,7 +129,13 @@ export default async function render(root) {
       try {
         const needsReq = mode === 'remote' && policy.remoteNeedsApproval && !approvedRemote && !endedToday() && isWorkingPlan(plan);
         const wasStale = staleDay(u());
-        const res = await startDay(mode, { remoteApproved: !needsReq });
+        // a new day after the grace period, planned for 09:00: stay on the 09:00 shift (late) or start the 10:00 shift
+        let shift = '';
+        if (u().dayKey !== today() && canPickLateShift(plan) && lateness(now(), plan).late > 0) {
+          shift = await pickShift(plan);
+          if (shift === null) return;
+        }
+        const res = await startDay(mode, { remoteApproved: !needsReq, shift });
         if (needsReq) {
           const { submitRequest } = await import('../services/requests.js');
           try { await submitRequest({ type: 'remote', startDate: res.key, endDate: res.key, reason: L('طلب تلقائي عند بدء اليوم', 'Automatic request at check-in') }); }
@@ -140,6 +147,28 @@ export default async function render(root) {
         if (wasStale) livePop({ icon: 'fa-triangle-exclamation', cls: 'warn', title: L('تحذير: نسيت تنهي يومك', 'Warning: you did not end your day'), text: L(`يوم ${fmtDate(wasStale)} ما اتقفلش، فاتقفل تلقائياً على ميعاد انصرافك. المرة الجاية اضغط «إنهاء اليوم» قبل ما تمشي.`, `${fmtDate(wasStale)} was not ended, so it was closed at your planned end time. Next time press "End day" before you leave.`), ttl: 30000 });
       } catch (e) { toastErr(e); }
     }));
+  }
+
+  /** '' = stay on the planned shift, '10' = the 10:00–19:00 shift, null = cancelled */
+  function pickShift(plan) {
+    return new Promise((resolve) => {
+      let done = false;
+      const late9 = lateness(now(), plan).late, late10 = lateness(now(), withShift(plan, LATE_SHIFT.id)).late;
+      const m = modal({
+        title: L('إنت متأخر عن ميعادك', 'You are past your start time'), icon: 'fa-clock', size: 'narrow',
+        body: `<div class="col gap-12">
+          <p class="muted small">${L(`ميعادك ${plan.start} وفترة السماح خلصت. تكمّل على شيفتك ولا تبدأ شيفت 10؟`, `You start at ${plan.start} and the grace period is over. Keep your shift or start the 10:00 shift?`)}</p>
+          <button class="btn btn-lg btn-block" data-shift="" style="height:auto;padding:14px;justify-content:flex-start;text-align:start">
+            <i class="fas fa-business-time"></i><span class="grow"><b>${L(`أكمّل على شيفت ${plan.start.slice(0, 2).replace(/^0/, '')}`, `Keep the ${plan.start} shift`)}</b><small class="muted" style="display:block">${esc(plan.start)}–${esc(plan.end)}</small></span>
+            <span class="badge bad">${L('تأخير', 'Late')} ${esc(fmtMin(late9))}</span></button>
+          <button class="btn btn-lg btn-block btn-primary" data-shift="${LATE_SHIFT.id}" style="height:auto;padding:14px;justify-content:flex-start;text-align:start">
+            <i class="fas fa-clock-rotate-left"></i><span class="grow"><b>${L('أبدأ شيفت 10', 'Start the 10:00 shift')}</b><small style="display:block;opacity:.85">${LATE_SHIFT.start}–${LATE_SHIFT.end}</small></span>
+            ${late10 ? `<span class="badge bad">${L('تأخير', 'Late')} ${esc(fmtMin(late10))}</span>` : `<span class="badge ok">${L('من غير تأخير', 'On time')}</span>`}</button>
+        </div>`,
+        onClose: () => { if (!done) resolve(null); }
+      });
+      m.$$('[data-shift]').forEach(b => b.onclick = () => { done = true; m.close(); resolve(b.dataset.shift); });
+    });
   }
 
   function renderStats() {
