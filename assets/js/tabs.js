@@ -137,11 +137,13 @@ function menu(id, x, y) {
 
 function draw() {
   const bar = document.getElementById('tabbar'); if (!bar) return;
+  const firstLoose = tabs.find(t => !t.pinned);
+  const anyPinned = tabs.some(t => t.pinned);
   bar.innerHTML = tabs.map((t, n) => {
     const r = routeOf(t.id); if (!r) return '';
     const name = L(r.ar, r.en);
     const title = t.sub ? `${name} · ${t.sub}` : name;
-    return `<div class="tab ${t.id === active ? 'on' : ''} ${t.pinned ? 'pinned' : ''}" data-tab="${esc(t.id)}" draggable="true" role="tab" aria-selected="${t.id === active}" title="${esc(title)}${n < 9 ? ` (Alt+${n + 1})` : ''}">
+    return `<div class="tab ${t.id === active ? 'on' : ''} ${t.pinned ? 'pinned' : ''} ${anyPinned && t === firstLoose ? 'after-pins' : ''}" data-tab="${esc(t.id)}" draggable="true" role="tab" aria-selected="${t.id === active}" title="${esc(title)}${n < 9 ? ` (Alt+${n + 1})` : ''}">
       <i class="fas ${r.icon}"></i>${t.pinned ? '' : `<span class="tab-name">${esc(name)}${t.sub ? `<small> · ${esc(t.sub)}</small>` : ''}</span>`}
       ${r.badge ? `<span class="badge-count hidden" data-badge="${r.badge}"></span>` : ''}
       ${t.pinned ? '' : `<button class="tab-x" data-close="${esc(t.id)}" aria-label="${L('قفل', 'Close')}"><i class="fas fa-xmark"></i></button>`}</div>`;

@@ -133,6 +133,8 @@ async function route() {
   document.body.classList.remove('nav-open');
   document.querySelectorAll('[data-route]').forEach(a => a.classList.toggle('active', a.dataset.route === r.id));
   byId('page-title').textContent = L(r.ar, r.en);
+  byId('page-icon').innerHTML = `<i class="fas ${r.icon}"></i>`;
+  byId('page-crumb').textContent = r.group && GROUPS[r.group] ? L(GROUPS[r.group].ar, GROUPS[r.group].en) : '';
   document.title = `${L(r.ar, r.en)} | AL MASTER`;
   if (chatCount) setBadges();
   if (current && current.cleanup) { try { current.cleanup(); } catch {} }

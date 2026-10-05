@@ -155,7 +155,23 @@ p { margin: 0; }
 .topbar .crumb { font-size: 12px; color: var(--muted); }
 .topbar .clock { font-family: var(--font-num); font-weight: 700; font-size: 18px; color: var(--text); }
 .topbar .date { font-size: 12px; color: var(--muted); }
-.menu-btn { display: none; }
+.btn.menu-btn { display: none; }
+#view:focus, #view:focus-visible { outline: none; }
+/* header: page icon + section, clock card, equal tool buttons */
+.tb-title { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.tb-title h1 { font-size: 17px; font-weight: 800; line-height: 1.25; }
+.tb-crumb { font-size: 11.5px; font-weight: 700; color: var(--muted); line-height: 1.2; }
+.tb-crumb:empty { display: none; }
+.tb-tools { display: flex; align-items: center; gap: 8px; }
+.tb-clock { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.tb-clock i { font-size: 13px; }
+.topbar .tb-clock .clock { font-size: 15px; font-weight: 800; color: var(--text); }
+.topbar .tb-clock .date { font-size: 12.5px; }
+.tb-btn { position: relative; width: 38px; height: 38px; flex: none; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; font: inherit; font-size: 15px; text-decoration: none; transition: color .15s, border-color .15s, background .15s; }
+.tb-btn:hover { color: var(--brand); border-color: var(--brand-ring); background: var(--brand-soft); text-decoration: none; }
+.tb-lang { font-size: 12.5px; font-weight: 800; }
+.tb-btn .badge-count { position: absolute; top: -6px; inset-inline-end: -6px; font-size: 10px; min-width: 18px; height: 18px; border: 2px solid var(--surface); }
 .content { padding: 26px 28px 60px; max-width: 1400px; width: 100%; margin: 0 auto; }
 .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
 .page-head h2 { font-size: 22px; font-weight: 800; }
@@ -163,22 +179,26 @@ p { margin: 0; }
 .scrim { display: none; }
 
 /* ---------- top tabs (desktop) ---------- */
-.tabbar { display: flex; align-items: flex-end; gap: 2px; padding: 6px 20px 0; background: var(--surface-2); border-bottom: 1px solid var(--border);
-  position: sticky; top: var(--topbar-h); z-index: 29; overflow-x: auto; scrollbar-width: none; min-height: 43px; }
+.tabbar { display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 22px; background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: var(--topbar-h); z-index: 29; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tabbar::-webkit-scrollbar { display: none; }
-.tab { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 10px 10px 0 0;
-  color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; user-select: none; flex-shrink: 0; max-width: 240px; position: relative; }
-.tab:hover { background: var(--surface); color: var(--text); }
-.tab.on { background: var(--bg); color: var(--brand); border-color: var(--border); margin-bottom: -1px; height: 37px; }
-.tab.on::before { content: ''; position: absolute; top: -1px; inset-inline: 10px; height: 3px; border-radius: 0 0 3px 3px; background: var(--brand); }
-.tab.pinned { padding: 0 11px; }
-.tab > i { font-size: 13px; }
+.tab { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 12px; border: 1px solid transparent; border-radius: 10px;
+  color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; user-select: none; flex-shrink: 0; max-width: 250px; position: relative;
+  transition: background .15s, color .15s, border-color .15s; }
+.tab:hover { background: var(--surface-2); color: var(--text); }
+.tab.on { background: var(--brand-soft); color: var(--brand); border-color: var(--brand-ring); }
+.tab > i { font-size: 13.5px; width: 16px; text-align: center; }
+.tab.pinned { width: 36px; padding: 0; justify-content: center; border-color: var(--border); }
+.tab.pinned.on { border-color: var(--brand-ring); }
+.tab.after-pins { margin-inline-start: 13px; }
+.tab.after-pins::before { content: ''; position: absolute; inset-inline-start: -9px; top: 8px; bottom: 8px; width: 1px; background: var(--border-strong); }
 .tab-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.tab-name small { font-weight: 600; color: var(--muted); font-size: 12px; }
+.tab-name small { font-weight: 600; font-size: 12px; opacity: .8; }
 .tab .badge-count { font-size: 10px; min-width: 17px; height: 17px; }
-.tab.pinned .badge-count { position: absolute; top: 3px; inset-inline-end: 1px; }
-.tab-x { border: 0; background: none; color: inherit; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; cursor: pointer; opacity: .55; font-size: 11px; margin-inline-start: 2px; }
-.tab-x:hover { opacity: 1; background: var(--surface-2); color: var(--bad); }
+.tab.pinned .badge-count { position: absolute; top: -6px; inset-inline-end: -6px; border: 2px solid var(--surface); min-width: 18px; height: 18px; }
+.tab-x { border: 0; background: none; color: inherit; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; cursor: pointer; opacity: .35; font-size: 11px; flex: none; transition: opacity .15s, background .15s; }
+.tab:hover .tab-x, .tab.on .tab-x { opacity: .7; }
+.tab-x:hover { opacity: 1 !important; background: var(--bad-bg); color: var(--bad); }
 .tab.dragging { opacity: .4; }
 .tab-menu { position: fixed; z-index: 90; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 4px; min-width: 200px; }
 .tab-menu button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text); text-align: start; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
@@ -192,21 +212,27 @@ p { margin: 0; }
   .sidebar { position: fixed; inset-block: 0; inset-inline-start: 0; width: var(--rail-w); overflow: hidden; transition: width .18s ease, box-shadow .18s ease; }
   .sidebar:hover, .sidebar:focus-within { width: var(--sidebar-w); box-shadow: 0 0 40px rgba(7,10,36,.45); }
   .main { margin-inline-start: var(--rail-w); }
-  .sidebar-brand { padding: 0 20px; }
+  .sidebar-brand { padding: 0 22px; }
   .brand-mark { height: 26px; width: auto; }
   .sidebar:not(:hover):not(:focus-within) .brand-full { display: none; }
   .sidebar:not(:hover):not(:focus-within) .brand-mark { display: block; }
-  .sidebar-nav { overflow-x: hidden; padding-inline: 12px; }
-  .nav-item { white-space: nowrap; position: relative; padding: 10px 14px; }
-  .nav-item i { flex-shrink: 0; }
+  /* compact, no scrollbar: the whole menu fits; on very short screens it still scrolls with the wheel */
+  .sidebar-nav { overflow-x: hidden; padding: 6px 12px; scrollbar-width: none; }
+  .sidebar-nav::-webkit-scrollbar { display: none; }
+  .nav-group, .nav-group:first-child { margin-top: 0; }
+  .nav-label { height: 15px; padding: 0 14px; display: flex; align-items: center; font-size: 10px; line-height: 1; white-space: nowrap; overflow: hidden; position: relative; }
+  .nav-group:first-child .nav-label { display: none; }
+  .nav-item { white-space: nowrap; position: relative; height: 30px; padding: 0 14px; gap: 14px; margin: 0; border-radius: 9px; }
+  .nav-item i { flex-shrink: 0; font-size: 16px; width: 20px; }
   .nav-item span:not(.badge-count), .nav-label, .user-chip .who, .user-chip .btn { transition: opacity .15s ease; }
   .sidebar:not(:hover):not(:focus-within) .nav-item span:not(.badge-count),
-  .sidebar:not(:hover):not(:focus-within) .nav-label,
   .sidebar:not(:hover):not(:focus-within) .user-chip .who,
   .sidebar:not(:hover):not(:focus-within) .user-chip .btn { opacity: 0; }
-  .sidebar:not(:hover):not(:focus-within) .nav-item .badge-count { position: absolute; top: 3px; inset-inline-start: 26px; font-size: 9.5px; min-width: 16px; height: 16px; }
-  .sidebar-foot { padding: 14px 10px; }
-  .user-chip { white-space: nowrap; }
+  .sidebar:not(:hover):not(:focus-within) .nav-label { color: transparent; }
+  .sidebar:not(:hover):not(:focus-within) .nav-label::after { content: ''; position: absolute; inset-inline: 14px; top: 50%; height: 1px; width: 20px; background: rgba(255,255,255,.14); }
+  .sidebar:not(:hover):not(:focus-within) .nav-item .badge-count { position: absolute; top: -3px; inset-inline-start: 26px; font-size: 9.5px; min-width: 16px; height: 16px; border: 2px solid var(--navy); }
+  .sidebar-foot { padding: 8px 12px; }
+  .user-chip { white-space: nowrap; padding: 4px 6px; }
 }
 @media (max-width: 960px) { .tabbar { display: none; } }
 @media print { .tabbar { display: none; } }
@@ -216,8 +242,11 @@ p { margin: 0; }
   html[dir="ltr"] .sidebar { transform: translateX(-100%); }
   body.nav-open .sidebar { transform: none; }
   body.nav-open .scrim { display: block; position: fixed; inset: 0; background: rgba(7,10,36,.5); z-index: 35; }
-  .menu-btn { display: inline-flex; }
-  .topbar { padding: 0 16px; }
+  .btn.menu-btn { display: inline-flex; }
+  .topbar { padding: 0 16px; gap: 10px; }
+  .tb-title .icon-tile { display: none; }
+  .tb-clock { padding: 0 10px; }
+  .tb-clock i { display: none; }
   .topbar .date { display: none; }
   .content { padding: 18px 16px 90px; }
 }
@@ -653,7 +682,7 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .act-time { width: 64px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
 
 /* ---------- chat ---------- */
-.chat-app { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; height: calc(100dvh - var(--topbar-h) - 43px - 52px); min-height: 460px; margin: -8px 0 -40px; } /* 43px = the tab bar */
+.chat-app { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; height: calc(100dvh - var(--topbar-h) - 48px - 52px); min-height: 460px; margin: -8px 0 -40px; } /* 48px = the tab bar */
 .chat-side { display: flex; flex-direction: column; min-height: 0; overflow: visible; }
 .chat-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 16px 10px; }
 .chat-side-head h2 { font-size: 18px; font-weight: 800; }

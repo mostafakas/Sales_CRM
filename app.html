@@ -40,19 +40,15 @@
     <div class="main">
       <header class="topbar">
         <button class="btn btn-ghost btn-icon menu-btn" id="menu-btn" aria-label="Menu"><i class="fas fa-bars"></i></button>
-        <div class="grow">
-          <h1 id="page-title">—</h1>
+        <div class="tb-title">
+          <span class="icon-tile" id="page-icon" aria-hidden="true"><i class="fas fa-house"></i></span>
+          <div class="min0"><div class="tb-crumb" id="page-crumb"></div><h1 id="page-title" class="truncate">—</h1></div>
         </div>
-        <div class="row gap-8">
-          <div class="no-print" style="text-align:end;line-height:1.2">
-            <div class="clock" id="clock">--:--</div>
-            <div class="date" id="today"></div>
-          </div>
-          <a href="#/notifications" class="btn btn-ghost btn-icon" id="bell" aria-label="Notifications" style="position:relative">
-            <i class="fas fa-bell"></i><span class="badge-count hidden" id="bell-count" style="position:absolute;top:2px;inset-inline-end:0"></span>
-          </a>
-          <button class="btn btn-ghost btn-icon" id="theme-btn" aria-label="Theme"><i class="fas fa-moon"></i></button>
-          <button class="btn btn-ghost btn-sm" id="lang-btn" style="font-weight:800">EN</button>
+        <div class="tb-tools">
+          <div class="tb-clock no-print"><i class="far fa-clock"></i><b class="clock" id="clock">--:--</b><span class="date" id="today"></span></div>
+          <a href="#/notifications" class="tb-btn" id="bell" aria-label="Notifications"><i class="fas fa-bell"></i><span class="badge-count hidden" id="bell-count"></span></a>
+          <button class="tb-btn" id="theme-btn" aria-label="Theme"><i class="fas fa-moon"></i></button>
+          <button class="tb-btn tb-lang" id="lang-btn" aria-label="Language">EN</button>
         </div>
       </header>
       <div class="tabbar no-print" id="tabbar" role="tablist" aria-label="Open pages"></div>
