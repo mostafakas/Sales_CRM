@@ -111,7 +111,7 @@ function cleanFields(f) {
   };
 }
 /** next task numbers (one shared counter) */
-async function nextNums(n) {
+export async function nextNums(n) {
   const ref = doc(db, 'counters', 'tasks');
   return runTransaction(db, async (tx) => {
     const s = await tx.get(ref);
@@ -227,6 +227,56 @@ export async function loadFile(meta) {
   const url = URL.createObjectURL(new Blob([arr], { type: meta.mime }));
   fileCache.set(meta.id, url);
   return url;
+}
+
+// ---------- people imported by name (no account yet) ----------
+/** names that own tasks / lead projects but have no account yet, with how many tasks each */
+export function pendingPeople() {
+  const m = new Map();
+  tasks.forEach(t => { if (!t.assignee && t.pendingAssignee) m.set(t.pendingAssignee, (m.get(t.pendingAssignee) || 0) + 1); });
+  projects.forEach(p => { (p.pendingMembers || []).concat(p.pendingLeader ? [p.pendingLeader] : []).forEach(n => { if (!m.has(n)) m.set(n, 0); }); });
+  return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+}
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06ff]+/g, ' ').replace(/\b(al|el)\b/g, ' ').replace(/\s+/g, ' ').trim();
+/** very common first names: matched only against someone's first name, never inside a longer name */
+const COMMON = new Set(['mohamed', 'mohammed', 'muhammad', 'mohammad', 'ahmed', 'ahmad', 'mahmoud', 'mostafa', 'mustafa', 'ali', 'omar', 'hassan', 'hussein', 'ibrahim', 'abdallah', 'abdullah', 'khaled', 'youssef', 'yousef', 'mr', 'eng', 'dr']);
+const lev = (a, b) => { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; };
+/** "Lina" ≈ "Linaa", "Sabry" ≈ "Sapry" */
+const near = (a, b) => a === b || (Math.min(a.length, b.length) >= 4 && Math.abs(a.length - b.length) <= 2 && (a.startsWith(b) || b.startsWith(a) || (a.length >= 5 && lev(a, b) <= 1)));
+/** a likely account for a name written in Notion ("Abo Elkheer" → "Ahmed Abo Elkher", "Morsy" → "… Morsy …"); only when exactly one fits */
+export function guessPerson(name) {
+  const n = norm(name); if (!n) return null;
+  const words = n.split(' ');
+  const hits = activePeople().filter(p => {
+    const full = norm(p.name), pw = full.split(' ').filter(Boolean), local = norm(String(p.email).split('@')[0].replace(/[._-]+/g, ' '));
+    if (full === n || local === n) return true;
+    if (words.length > 1) { const a = full.replace(/ /g, ''), b = n.replace(/ /g, ''); return a.includes(b) || (b.length >= 6 && (a.includes(b.slice(0, 6)) || local.replace(/ /g, '').includes(b.slice(0, 6)))); }
+    const w = words[0];
+    if (COMMON.has(w)) return pw[0] === w;
+    return pw.some(x => near(x, w)) || local.split(' ').some(x => near(x, w));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+/** Admin: hand everything waiting under a name to a real account */
+export async function linkPending(name, email) {
+  if (!seesAllTasks()) throw userError('الربط للأدمن ومدير المشروعات.', 'Only admins and project managers can link people.');
+  const p = person(email); if (!p) throw userError('اختار الموظف.', 'Pick the employee.');
+  const ts = tasks.filter(t => !t.assignee && t.pendingAssignee === name);
+  const ps = projects.filter(x => (x.pendingMembers || []).includes(name) || x.pendingLeader === name);
+  for (let i = 0; i < ts.length; i += 400) {
+    const b = writeBatch(db);
+    ts.slice(i, i + 400).forEach(t => b.update(doc(db, 'tasks', t.id), { assignee: email, leader: p.leaderEmail || '', pendingAssignee: '', updatedAt: serverTimestamp(),
+      history: arrayUnion({ by: session.email, from: t.status, to: t.status, at: now(), note: L(`اتسند لـ ${nameOf(email)} (كان باسم ${name})`, `assigned to ${nameOf(email)} (was "${name}")`) }) }));
+    await b.commit();
+  }
+  for (const x of ps) {
+    const upd = { pendingMembers: (x.pendingMembers || []).filter(n => n !== name), members: [...new Set([...(x.members || []), email])], updatedAt: serverTimestamp() };
+    if (x.pendingLeader === name) { upd.pendingLeader = ''; upd.leader = email; }
+    await updateDoc(doc(db, 'tk_projects', x.id), upd);
+  }
+  if (ts.length) notifyMany([email], L(`عندك ${ts.length} تاسك جديد`, `You have ${ts.length} new tasks`), L('اتنقلوا من Notion', 'Moved from Notion'), '#/tasks', 'progress');
+  track('task.link', { target: name, detail: `${nameOf(email)} · ${ts.length}` });
+  return ts.length;
 }
 
 // ---------- team permission: "may create tasks for themselves" ----------

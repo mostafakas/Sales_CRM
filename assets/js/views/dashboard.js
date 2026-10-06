@@ -7,6 +7,7 @@ import { toMs } from '../core/fb.js';
 import { teamMonth } from '../services/reports.js';
 import { nameOf, person } from '../services/directory.js';
 import { startTasks, onTasks, allTasks, doneDay } from '../services/tasks.js';
+import { watchMonth } from '../services/todos.js';
 
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const avgHours = (t) => (t.present ? (t.workMs + t.meetingMs) / t.present : 0);
@@ -25,7 +26,8 @@ function taskStats(ts, ym) {
 
 export default async function render(root) {
   startTasks();
-  let ym = ymd(now()).slice(0, 7), dept = '', data = null, sortBy = 'late';
+  let ym = ymd(now()).slice(0, 7), dept = '', data = null, sortBy = 'late', todos = [], unTodo = null;
+  const watchTodo = () => { if (unTodo) unTodo(); unTodo = watchMonth(ym, rows => { todos = rows; draw(); }); };
   const scopeAll = isAdmin() || isHR();
   root.innerHTML = `<div class="page-head"><div><h2>${L('الداشبورد', 'Dashboard')}</h2><p>${scopeAll ? L('الشركة كلها', 'The whole company') : L('فريقك', 'Your team')}</p></div>
       <div class="row gap-8 wrap"><select class="select" id="dept" style="min-width:160px"></select><input class="input" type="month" id="ym" value="${ym}" max="${ym}" style="width:170px"></div></div>
@@ -47,7 +49,8 @@ export default async function render(root) {
     const tasks = allTasks();
     const per = rows.map(x => {
       const t = x.totals;
-      return { p: x.person, t, hrs: avgHours(t), tk: taskStats(tasks.filter(k => k.assignee === x.person.email), ym) };
+      const td = todos.filter(k => k.owner === x.person.email);
+      return { p: x.person, t, hrs: avgHours(t), tk: taskStats(tasks.filter(k => k.assignee === x.person.email), ym), td: td.length ? Math.round(td.filter(k => k.done).length / td.length * 100) : null, tdN: td.length };
     });
     const sum = (f) => per.reduce((s, x) => s + f(x), 0);
     const present = sum(x => x.t.present), absent = sum(x => x.t.absent), lateDays = sum(x => x.t.lateDays), lateMin = sum(x => x.t.lateMinutes);
@@ -71,7 +74,7 @@ export default async function render(root) {
 
     const topLate = per.filter(x => x.t.lateMinutes > 0).sort((a, b) => b.t.lateMinutes - a.t.lateMinutes).slice(0, 5);
     const topGood = per.filter(x => x.t.present > 0).sort((a, b) => b.t.commitment - a.t.commitment || a.t.lateMinutes - b.t.lateMinutes || b.hrs - a.hrs).slice(0, 5);
-    const sorters = { late: (a, b) => b.t.lateMinutes - a.t.lateMinutes, absent: (a, b) => b.t.absent - a.t.absent, hours: (a, b) => b.hrs - a.hrs, commit: (a, b) => a.t.commitment - b.t.commitment, tasks: (a, b) => b.tk.lateOpen - a.tk.lateOpen || a.tk.rate - b.tk.rate, name: (a, b) => (a.p.name || '').localeCompare(b.p.name || '', 'ar') };
+    const sorters = { todo: (a, b) => (a.td ?? 101) - (b.td ?? 101), late: (a, b) => b.t.lateMinutes - a.t.lateMinutes, absent: (a, b) => b.t.absent - a.t.absent, hours: (a, b) => b.hrs - a.hrs, commit: (a, b) => a.t.commitment - b.t.commitment, tasks: (a, b) => b.tk.lateOpen - a.tk.lateOpen || a.tk.rate - b.tk.rate, name: (a, b) => (a.p.name || '').localeCompare(b.p.name || '', 'ar') };
     const link = (p) => isHR() ? `#/employees/${encodeURIComponent(p.email)}` : `#/reports`;
     const th = (k, t) => `<th class="${k === 'name' ? '' : 'num'}"><button class="db-sort ${sortBy === k ? 'on' : ''}" data-sort="${k}">${t}${sortBy === k ? ' <i class="fas fa-arrow-down-short-wide"></i>' : ''}</button></th>`;
 
@@ -100,18 +103,20 @@ export default async function render(root) {
         <thead><tr><th>${L('الليدر', 'Leader')}</th><th class="num">${L('تاسكات', 'Tasks')}</th><th class="num">${L('خلصت', 'Done')}</th><th class="num">${L('مفتوحة', 'Open')}</th><th class="num">${L('متأخرة', 'Late')}</th><th class="num">${L('الإنجاز', 'Completion')}</th><th class="num">${L('في الميعاد', 'On time')}</th></tr></thead>
         <tbody>${leaderRows.map(r => { const p = person(r.e) || { email: r.e, name: nameOf(r.e) }; return `<tr><td><span class="tk-who">${avatar(p, 'xs')}<b>${esc(p.name || r.e)}</b></span></td><td class="num">${r.tk.total}</td><td class="num">${r.tk.done}</td><td class="num">${r.tk.open}</td><td class="num ${r.tk.lateOpen ? 'bad-txt' : ''}">${r.tk.lateOpen}</td><td class="num">${r.tk.rate}%</td><td class="num">${r.tk.done ? r.tk.onTimeRate + '%' : '—'}</td></tr>`; }).join('')}</tbody></table></div></section>` : ''}
       <section class="card"><div class="card-head"><h3><i class="fas fa-users"></i> ${L('كل الموظفين', 'Everyone')}</h3><span class="xs muted">${L('اضغط على عنوان العمود للترتيب', 'Click a column title to sort')}</span></div><div class="table-wrap"><table class="table">
-        <thead><tr>${th('name', L('الموظف', 'Employee'))}${th('commit', L('الالتزام', 'Commitment'))}${th('absent', L('غياب', 'Absent'))}${th('late', L('التأخير', 'Late'))}${th('hours', L('ساعات / يوم', 'Hours / day'))}${th('tasks', L('التاسكات', 'Tasks'))}</tr></thead>
+        <thead><tr>${th('name', L('الموظف', 'Employee'))}${th('commit', L('الالتزام', 'Commitment'))}${th('absent', L('غياب', 'Absent'))}${th('late', L('التأخير', 'Late'))}${th('hours', L('ساعات / يوم', 'Hours / day'))}${th('tasks', L('التاسكات', 'Tasks'))}${th('todo', 'To-Do')}</tr></thead>
         <tbody>${per.slice().sort(sorters[sortBy]).map(x => `<tr><td><a class="tk-who" href="${link(x.p)}" style="color:inherit">${avatar(x.p, 'xs')}<span><b>${esc(x.p.name || x.p.email)}</b><small class="muted"> · ${esc(x.p.department || '')}</small></span></a></td>
           <td class="num"><span class="db-pill ${x.t.commitment >= 95 ? 'ok' : x.t.commitment >= 85 ? 'warn' : 'bad'}">${x.t.commitment}%</span></td><td class="num">${x.t.absent}</td><td class="num">${x.t.lateMinutes ? `${esc(fmtMin(x.t.lateMinutes))} <small class="muted">(${x.t.lateDays})</small>` : '—'}</td>
-          <td class="num">${x.t.present ? esc(fmtHours(x.hrs)) : '—'}</td><td class="num">${x.tk.total ? `${x.tk.done}/${x.tk.done + x.tk.open}${x.tk.lateOpen ? ` <span class="bad-txt">· ${x.tk.lateOpen} ${L('متأخر', 'late')}</span>` : ''}` : '—'}</td></tr>`).join('')}</tbody></table></div></section>`;
+          <td class="num">${x.t.present ? esc(fmtHours(x.hrs)) : '—'}</td><td class="num">${x.tk.total ? `${x.tk.done}/${x.tk.done + x.tk.open}${x.tk.lateOpen ? ` <span class="bad-txt">· ${x.tk.lateOpen} ${L('متأخر', 'late')}</span>` : ''}` : '—'}</td>
+          <td class="num">${x.td === null ? '—' : `<a href="#/todo/${encodeURIComponent(x.p.email)}">${x.td}%</a> <small class="muted">(${x.tdN})</small>`}</td></tr>`).join('')}</tbody></table></div></section>`;
   }
 
   root.addEventListener('change', (e) => {
-    if (e.target.id === 'ym' && e.target.value) { ym = e.target.value; load(); }
+    if (e.target.id === 'ym' && e.target.value) { ym = e.target.value; watchTodo(); load(); }
     if (e.target.id === 'dept') { dept = e.target.value; draw(); }
   });
   root.addEventListener('click', (e) => { const s = e.target.closest('[data-sort]'); if (s) { sortBy = s.dataset.sort; draw(); } });
   const off = onTasks(() => draw());
+  watchTodo();
   await load();
-  return () => off();
+  return () => { off(); if (unTodo) unTodo(); };
 }

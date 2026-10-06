@@ -2,12 +2,13 @@
 // Routes: #/tasks · #/tasks/t/<taskId> · #/tasks/projects[/<id>] · #/tasks/clients[/<id>]
 import { L, esc, fmtDate, ymd, addDays, debounce } from '../core/utils.js';
 import { toast, toastErr, avatar, empty, modal, busy, confirmDialog } from '../core/ui.js';
-import { session, now, isAdmin } from '../core/session.js';
+import { session, now, isAdmin, isHR } from '../core/session.js';
 import { activePeople, person, nameOf, onDirectory } from '../services/directory.js';
 import {
   STATUS, ORDER, PRIORITY, PROJECT_STATUS, startTasks, onTasks, allTasks, allProjects, allClients, projectById, clientById, isLate, doneDay, canMove,
-  canCreate, canManageProjects, seesAllTasks, saveProject, deleteProject, saveClient, deleteClient, importFromCrm, migrateChatTasks, setSelfTasks, taskById
+  canCreate, canManageProjects, seesAllTasks, saveProject, deleteProject, saveClient, deleteClient, importFromCrm, migrateChatTasks, setSelfTasks, taskById, pendingPeople
 } from '../services/tasks.js';
+import { watchMonth } from '../services/todos.js';
 import { card, move, editor, details, who, statusBadge } from './task-ui.js';
 import { setTabLabel } from '../tabs.js';
 import { dayKey } from '../core/policy.js';
@@ -19,9 +20,9 @@ const isLeaderOfAny = () => activePeople().some(p => p.leaderEmail === session.e
 
 export default async function render(root, { params = [] }) {
   startTasks();
-  const tab = params[0] === 'projects' ? 'projects' : params[0] === 'clients' ? 'clients' : 'tasks';
+  const tab = ['projects', 'clients', 'team'].includes(params[0]) ? params[0] : 'tasks';
   const subId = params[1] ? decodeURIComponent(params[1]) : '';
-  const showClients = seesAllTasks() || isLeaderOfAny();
+  const showClients = seesAllTasks() || isLeaderOfAny() || isHR();
   if (isAdmin()) migrateChatTasks().then(n => { if (n) toast(L(`اتنقل ${n} تاسك من الشات لصفحة التاسكات`, `${n} chat tasks moved to the Tasks page`)); }).catch(e => console.warn('migrate', e && e.message));
 
   root.innerHTML = `<div class="tk-page">
@@ -30,6 +31,8 @@ export default async function render(root, { params = [] }) {
         <a href="#/tasks" class="${tab === 'tasks' ? 'on' : ''}"><i class="fas fa-list-check"></i> ${L('التاسكات', 'Tasks')}</a>
         <a href="#/tasks/projects" class="${tab === 'projects' ? 'on' : ''}"><i class="fas fa-diagram-project"></i> ${L('المشاريع', 'Projects')}</a>
         ${showClients ? `<a href="#/tasks/clients" class="${tab === 'clients' ? 'on' : ''}"><i class="fas fa-handshake"></i> ${L('العملاء', 'Clients')}</a>` : ''}
+        ${showClients ? `<a href="#/tasks/team" class="${tab === 'team' ? 'on' : ''}"><i class="fas fa-people-group"></i> ${L('الفريق', 'Team')}</a>` : ''}
+        <a href="#/todo"><i class="fas fa-square-check"></i> To-Do</a>
       </div>
       <div class="row gap-8 wrap" id="head-actions"></div>
     </div>
@@ -39,6 +42,7 @@ export default async function render(root, { params = [] }) {
   if (tab === 'tasks') cleanup = tasksTab(body, actions, params[0] === 't' ? subId : '');
   if (tab === 'projects') cleanup = subId ? projectPage(body, actions, subId) : projectsTab(body, actions);
   if (tab === 'clients') cleanup = subId ? clientPage(body, actions, subId) : clientsTab(body, actions);
+  if (tab === 'team') cleanup = teamTab(body, actions);
   return () => cleanup();
 }
 
@@ -50,10 +54,11 @@ function tasksTab(body, actions, openId, fixed = {}) {
   let q = '', finishedDay = '', calMonth = ymd(now()).slice(0, 7);
   const isFixed = !!fixed.projectId;
   if (!isFixed) setTabLabel('');
-  const people = () => { const s = new Set(allTasks().map(t => t.assignee)); return [...s].map(e => who(e)).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); };
+  const people = () => { const s = new Set(allTasks().map(t => t.assignee).filter(Boolean)); return [...s].map(e => who(e)).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); };
   const drawActions = () => {
     actions.innerHTML = `
       <div class="seg" id="views">${[['board', 'fa-table-columns', 'Board'], ['list', 'fa-list', 'List'], ['calendar', 'fa-calendar-days', L('التقويم', 'Calendar')]].map(([v, i, t]) => `<button data-view="${v}" class="${prefs.view === v ? 'on' : ''}"><i class="fas ${i}"></i> ${t}</button>`).join('')}</div>
+      ${!isFixed && seesAllTasks() ? `<button class="btn btn-ghost btn-sm" id="notion-imp"><i class="fas fa-file-import"></i> ${L('استيراد من Notion', 'Import from Notion')}</button>` : ''}
       ${!isFixed && (isLeaderOfAny() || isAdmin()) ? `<button class="btn btn-ghost btn-sm" id="team-perm" title="${L('مين يقدر يعمل تاسكات لنفسه', 'Who may create their own tasks')}"><i class="fas fa-user-gear"></i> ${L('صلاحيات الفريق', 'Team access')}</button>` : ''}
       ${canCreate() ? `<button class="btn btn-primary" id="new-task"><i class="fas fa-plus"></i> ${L('تاسك جديد', 'New task')}</button>` : ''}`;
   };
@@ -61,7 +66,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
     const mgr = seesAllTasks() || isLeaderOfAny();
     return `<div class="tk-filters">
       <div class="search"><i class="fas fa-search"></i><input class="input" id="tf-q" placeholder="${L('بحث بالعنوان أو الرقم', 'Search title or number')}" value="${esc(q)}"></div>
-      ${mgr ? `<select class="select" id="tf-who"><option value="">${L('كل الموظفين', 'Everyone')}</option><option value="__me" ${prefs.who === '__me' ? 'selected' : ''}>${L('تاسكاتي أنا', 'My tasks')}</option>${people().filter(p => p.email !== session.email).map(p => `<option value="${esc(p.email)}" ${prefs.who === p.email ? 'selected' : ''}>${esc(p.name || p.email)}</option>`).join('')}</select>` : ''}
+      ${mgr ? `<select class="select" id="tf-who"><option value="">${L('كل الموظفين', 'Everyone')}</option><option value="__me" ${prefs.who === '__me' ? 'selected' : ''}>${L('تاسكاتي أنا', 'My tasks')}</option>${allTasks().some(t => !t.assignee) ? `<option value="__pending" ${prefs.who === '__pending' ? 'selected' : ''}>${L('ملهمش يوزر لسه', 'No account yet')}</option>` : ''}${people().filter(p => p.email !== session.email).map(p => `<option value="${esc(p.email)}" ${prefs.who === p.email ? 'selected' : ''}>${esc(p.name || p.email)}</option>`).join('')}</select>` : ''}
       ${isFixed ? '' : `<select class="select" id="tf-project"><option value="">${L('كل المشاريع', 'All projects')}</option><option value="__none" ${prefs.project === '__none' ? 'selected' : ''}>${L('بدون مشروع', 'No project')}</option>${allProjects().map(p => `<option value="${esc(p.id)}" ${prefs.project === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`}
       ${mgr && !isFixed ? `<select class="select" id="tf-client"><option value="">${L('كل العملاء', 'All clients')}</option>${allClients().map(c => `<option value="${esc(c.id)}" ${prefs.client === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : ''}
       <select class="select" id="tf-priority"><option value="">${L('كل الأولويات', 'Any priority')}</option>${Object.entries(PRIORITY).map(([k, v]) => `<option value="${k}" ${prefs.priority === k ? 'selected' : ''}>${esc(L(v.ar, v.en))}</option>`).join('')}</select>
@@ -75,7 +80,8 @@ function tasksTab(body, actions, openId, fixed = {}) {
     return allTasks().filter(t => {
       if (fixed.projectId && t.projectId !== fixed.projectId) return false;
       if (prefs.who === '__me' && t.assignee !== session.email) return false;
-      if (prefs.who && prefs.who !== '__me' && t.assignee !== prefs.who) return false;
+      if (prefs.who === '__pending' && t.assignee) return false;
+      if (prefs.who && prefs.who !== '__me' && prefs.who !== '__pending' && t.assignee !== prefs.who) return false;
       if (!isFixed && prefs.project === '__none' && t.projectId) return false;
       if (!isFixed && prefs.project && prefs.project !== '__none' && t.projectId !== prefs.project) return false;
       if (!isFixed && prefs.client && t.clientId !== prefs.client) return false;
@@ -107,7 +113,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
     if (!sorted.length) return `<div class="card">${empty('fa-list-check', L('مفيش تاسكات', 'No tasks'))}</div>`;
     return `<div class="card table-wrap"><table class="table tk-table"><thead><tr><th>#</th><th>${L('التاسك', 'Task')}</th><th>${L('المشروع', 'Project')}</th><th>${L('مسند لـ', 'Assignee')}</th><th>${L('الأولوية', 'Priority')}</th><th>${L('الحالة', 'Status')}</th><th>${L('التسليم', 'Due')}</th></tr></thead><tbody>
       ${sorted.map(t => `<tr data-open="${esc(t.id)}" class="${isLate(t) ? 'late' : ''}"><td class="num muted">#${t.num}</td><td><b>${esc(t.title)}</b>${(t.checklist || []).length ? ` <small class="muted num">${t.checklist.filter(x => x.done).length}/${t.checklist.length}</small>` : ''}</td>
-        <td>${esc(t.projectName || '—')}</td><td><span class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(nameOf(t.assignee))}</span></td>
+        <td>${esc(t.projectName || '—')}</td><td>${t.assignee ? `<span class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(nameOf(t.assignee))}</span>` : `<span class="tk-who pending"><i class="fas fa-user-clock"></i>${esc(t.pendingAssignee || '—')}</span>`}</td>
         <td>${t.priority && t.priority !== 'normal' ? `<span class="badge ${PRIORITY[t.priority].cls}">${esc(L(PRIORITY[t.priority].ar, PRIORITY[t.priority].en))}</span>` : `<span class="muted">${L('عادي', 'Normal')}</span>`}</td>
         <td>${statusBadge(t.status)}</td><td class="${isLate(t) ? 'tk-late' : ''}">${t.due ? esc(fmtDate(t.due)) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
   }
@@ -131,7 +137,8 @@ function tasksTab(body, actions, openId, fixed = {}) {
     drawActions();
     const rows = filtered();
     const open = rows.filter(t => t.status !== 'done');
-    body.innerHTML = `${filtersHTML()}
+    const pend = !isFixed && seesAllTasks() ? pendingPeople().filter(x => x.count) : [];
+    body.innerHTML = `${pend.length ? `<div class="alert warn mb-8"><i class="fas fa-user-clock"></i><span class="grow">${L(`${pend.reduce((s, x) => s + x.count, 0)} تاسك لأشخاص ملهمش يوزر لسه: ${pend.slice(0, 6).map(x => `${esc(x.name)} (${x.count})`).join('، ')}${pend.length > 6 ? '…' : ''}`, `${pend.reduce((s, x) => s + x.count, 0)} tasks belong to people without an account: ${pend.slice(0, 6).map(x => `${esc(x.name)} (${x.count})`).join(', ')}`)}</span><button class="btn btn-sm" id="pend-link"><i class="fas fa-link"></i> ${L('ربط بيوزرات', 'Link to accounts')}</button></div>` : ''}${filtersHTML()}
       <div class="tk-stats">${ORDER.filter(s => s !== 'done').map(s => `<span class="tk-stat ${STATUS[s].cls}"><i class="fas ${STATUS[s].icon}"></i>${STATUS[s].label}<b class="num">${rows.filter(t => t.status === s).length}</b></span>`).join('')}
         <span class="tk-stat late"><i class="fas fa-triangle-exclamation"></i>${L('متأخر', 'Late')}<b class="num">${open.filter(isLate).length}</b></span></div>
       <div id="tk-view">${prefs.view === 'list' ? listView(rows) : prefs.view === 'calendar' ? calendar(rows) : board(rows)}</div>`;
@@ -149,6 +156,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
   });
   body.addEventListener('input', debounce((e) => { if (e.target.id === 'tf-q') { q = e.target.value; const pos = e.target.selectionStart; draw(); const el = body.querySelector('#tf-q'); el.focus(); el.setSelectionRange(pos, pos); } }, 250));
   body.addEventListener('click', (e) => {
+    if (e.target.closest('#pend-link')) { import('./notion-import.js').then(m => m.openPendingPeople()); return; }
     if (e.target.closest('#tf-clear')) { q = ''; Object.assign(prefs, { who: '', project: '', client: '', priority: '', due: '' }); setPref('who', ''); return; }
     const fd = e.target.closest('[data-fday]'); if (fd) { const d = addDays(finishedDay || dayKey(now()), Number(fd.dataset.fday)); finishedDay = d >= dayKey(now()) ? '' : d; draw(); return; }
     const cal = e.target.closest('[data-cal]'); if (cal) { const [y, m] = calMonth.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + Number(cal.dataset.cal), 1)); calMonth = d.toISOString().slice(0, 7); draw(); return; }
@@ -158,6 +166,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
     const v = e.target.closest('[data-view]'); if (v) { setPref('view', v.dataset.view); return; }
     if (e.target.closest('#new-task')) editor(null, { projectId: fixed.projectId || (prefs.project && prefs.project !== '__none' ? prefs.project : '') });
     if (e.target.closest('#team-perm')) teamAccess();
+    if (e.target.closest('#notion-imp')) import('./notion-import.js').then(m => m.openNotionImport());
   };
   // drag a card to another column
   let dragId = '';
@@ -341,4 +350,60 @@ function clientEditor(c) {
     if (!f.name.trim()) { m.$('#cn').focus(); return; }
     try { await saveClient(c, f); m.close(); toast(L('اتحفظ العميل', 'Client saved')); } catch (ex) { toastErr(ex); }
   });
+}
+
+// =====================================================================================================
+// Team: everyone's load, delivery and to-do progress in one place
+// =====================================================================================================
+export function openTasksOf(email) {
+  try { const k = `am_tk_${session.email}`; const p = JSON.parse(localStorage.getItem(k) || '{}'); p.who = email === session.email ? '__me' : email; localStorage.setItem(k, JSON.stringify(p)); } catch {}
+  location.hash = '#/tasks';
+}
+function teamTab(body, actions) {
+  setTabLabel(L('الفريق', 'Team'));
+  actions.innerHTML = '';
+  const ym = ymd(now()).slice(0, 7), today = ymd(now());
+  let todos = [], sortBy = 'late';
+  const un = watchMonth(ym, rows => { todos = rows; draw(); });
+  const people = () => (seesAllTasks() || isHR()) ? activePeople() : activePeople().filter(p => p.leaderEmail === session.email);
+  function stats(p) {
+    const ts = allTasks().filter(t => t.assignee === p.email);
+    const open = ts.filter(t => t.status !== 'done');
+    const done = ts.filter(t => t.status === 'done' && doneDay(t).slice(0, 7) === ym);
+    const onTime = done.filter(t => !t.due || doneDay(t) <= t.due).length;
+    const td = todos.filter(x => x.owner === p.email), tdToday = td.filter(x => x.date === today);
+    return { p, open: open.length, review: open.filter(t => t.status === 'review').length, hold: open.filter(t => t.status === 'hold').length, late: open.filter(isLate).length,
+      done: done.length, onTime: done.length ? Math.round(onTime / done.length * 100) : null,
+      todayDone: tdToday.filter(x => x.done).length, todayAll: tdToday.length, monthPct: td.length ? Math.round(td.filter(x => x.done).length / td.length * 100) : null,
+      projects: new Set(open.map(t => t.projectId).filter(Boolean)).size };
+  }
+  function draw() {
+    const rows = people().map(stats);
+    const sorters = { late: (a, b) => b.late - a.late || b.open - a.open, open: (a, b) => b.open - a.open, done: (a, b) => b.done - a.done, todo: (a, b) => (a.monthPct ?? 101) - (b.monthPct ?? 101), name: (a, b) => (a.p.name || '').localeCompare(b.p.name || '', 'ar') };
+    rows.sort(sorters[sortBy]);
+    const max = Math.max(1, ...rows.map(r => r.open));
+    const sum = (k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+    const tdAll = sum('todayAll'), tdDone = sum('todayDone');
+    const tile = (icon, cls, label, value, hint = '') => `<div class="card stat"><div class="label"><span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>${esc(label)}</div><div class="value">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+    body.innerHTML = `<div class="grid g-4 keep-2 mb-16">
+        ${tile('fa-list-check', 'brand', L('تاسكات مفتوحة', 'Open tasks'), sum('open'), L(`عند ${rows.filter(r => r.open).length} شخص`, `held by ${rows.filter(r => r.open).length} people`))}
+        ${tile('fa-triangle-exclamation', 'bad', L('متأخرة', 'Late'), sum('late'), L(`${rows.filter(r => r.late).length} شخص عنده متأخر`, `${rows.filter(r => r.late).length} people have late tasks`))}
+        ${tile('fa-magnifying-glass', 'info', L('مستنية مراجعة', 'Waiting for review'), sum('review'))}
+        ${tile('fa-circle-check', 'ok', L('خلصت الشهر ده', 'Finished this month'), sum('done'), L(`To-Do النهارده: ${tdDone}/${tdAll}`, `To-Do today: ${tdDone}/${tdAll}`))}
+      </div>
+      <div class="row between mb-8 wrap gap-8"><b>${L(`${rows.length} شخص`, `${rows.length} people`)}</b><div class="seg">${[['late', L('المتأخر', 'Late')], ['open', L('المفتوح', 'Open')], ['done', L('المنجز', 'Done')], ['todo', 'To-Do'], ['name', L('الاسم', 'Name')]].map(([k, t]) => `<button data-tsort="${k}" class="${sortBy === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+      <div class="tm-grid">${rows.map(r => `<div class="card tm-card ${r.late ? 'has-late' : ''}">
+        <div class="row gap-10">${avatar(r.p, '')}<div class="grow min0"><b class="truncate">${esc(r.p.name || r.p.email)}</b><small class="muted truncate">${esc(r.p.title || '')}${r.p.department ? ' · ' + esc(r.p.department) : ''}</small></div></div>
+        <div class="tm-stats"><div><b class="num">${r.open}</b><small>${L('مفتوحة', 'Open')}</small></div><div class="${r.late ? 'bad' : ''}"><b class="num">${r.late}</b><small>${L('متأخرة', 'Late')}</small></div><div><b class="num">${r.review}</b><small>${L('مراجعة', 'Review')}</small></div><div class="ok"><b class="num">${r.done}</b><small>${L('خلصت', 'Done')}</small></div></div>
+        <div class="tm-load" title="${L('حجم الشغل المفتوح', 'Open workload')}"><span style="width:${Math.round(r.open / max * 100)}%"></span></div>
+        <div class="row between xs muted"><span>${r.onTime === null ? '' : L(`في الميعاد ${r.onTime}%`, `On time ${r.onTime}%`)}${r.projects ? ` · ${L(`${r.projects} مشروع`, `${r.projects} projects`)}` : ''}</span><span>To-Do ${r.todayAll ? `${r.todayDone}/${r.todayAll}` : '—'}${r.monthPct === null ? '' : ` · ${L('الشهر', 'month')} ${r.monthPct}%`}</span></div>
+        <div class="row gap-8"><button class="btn btn-sm grow" data-tasks-of="${esc(r.p.email)}"><i class="fas fa-clipboard-check"></i> ${L('التاسكات', 'Tasks')}</button><a class="btn btn-sm grow" href="#/todo/${encodeURIComponent(r.p.email)}"><i class="fas fa-square-check"></i> To-Do</a></div>
+      </div>`).join('') || `<div class="card">${empty('fa-people-group', L('مفيش حد في فريقك', 'Nobody in your team'))}</div>`}</div>`;
+  }
+  body.onclick = (e) => {
+    const s = e.target.closest('[data-tsort]'); if (s) { sortBy = s.dataset.tsort; draw(); return; }
+    const t = e.target.closest('[data-tasks-of]'); if (t) openTasksOf(t.dataset.tasksOf);
+  };
+  const off = onTasks(draw), off2 = onDirectory(draw);
+  return () => { un(); off(); off2(); };
 }

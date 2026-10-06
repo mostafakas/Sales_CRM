@@ -14,6 +14,7 @@ const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
   { id: 'chat', group: 'me', icon: 'fa-comments', ar: 'الشات', en: 'Chat', load: () => import('./views/chat.js'), badge: 'chat', bottom: true },
   { id: 'tasks', group: 'me', icon: 'fa-clipboard-check', ar: 'التاسكات', en: 'Tasks', load: () => import('./views/tasks.js'), badge: 'tasks' },
+  { id: 'todo', group: 'me', icon: 'fa-square-check', ar: 'To-Do List', en: 'To-Do List', load: () => import('./views/todo.js') },
   { id: 'announcements', group: 'me', icon: 'fa-bullhorn', ar: 'الإعلانات', en: 'Announcements', load: () => import('./views/announcements.js'), badge: 'ann' },
   { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
   { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js') },

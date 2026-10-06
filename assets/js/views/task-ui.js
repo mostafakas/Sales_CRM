@@ -30,7 +30,7 @@ export function card(t, { draggable = false } = {}) {
     <div class="tk-card-top"><span class="tk-num num">#${t.num}</span>${prioBadge(t.priority)}${t.projectName ? `<span class="tk-proj" style="--pc:${esc((p && p.color) || '#1b1bdb')}">${esc(t.projectName)}</span>` : ''}</div>
     <b class="tk-title">${esc(t.title)}</b>
     ${cp ? `<div class="tk-cl"><div class="tk-bar"><span style="width:${Math.round(cp.done / cp.all * 100)}%"></span></div><small class="num">${cp.done}/${cp.all}</small></div>` : ''}
-    <div class="tk-meta"><span class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(first(t.assignee))}</span>${dueText(t)}
+    <div class="tk-meta">${t.assignee ? `<span class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(first(t.assignee))}</span>` : `<span class="tk-who pending" title="${L('ملوش يوزر لسه', 'No account yet')}"><i class="fas fa-user-clock"></i>${esc(t.pendingAssignee || '—')}</span>`}${dueText(t)}
       ${t.commentsCount ? `<span><i class="far fa-comment"></i> ${t.commentsCount}</span>` : ''}
       ${t.status === 'done' && t.doneAt ? `<span class="tk-doneat"><i class="fas fa-check"></i> ${stamp(toMs(t.doneAt))}</span>` : ''}</div></div>`;
 }
@@ -148,10 +148,10 @@ export function details(id) {
       </div>
       <aside class="tk-d-side">
         <dl class="tk-kv">
-          <dt>${L('مسند لـ', 'Assigned to')}</dt><dd class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(nameOf(t.assignee))}</dd>
+          <dt>${L('مسند لـ', 'Assigned to')}</dt><dd>${t.assignee ? `<span class="tk-who">${avatar(who(t.assignee), 'xs')}${esc(nameOf(t.assignee))}</span> <a class="xs" href="#/todo${t.assignee === session.email ? '' : '/' + encodeURIComponent(t.assignee)}">To-Do</a>` : `<span class="tk-who pending"><i class="fas fa-user-clock"></i>${esc(t.pendingAssignee || '—')}</span> <small class="muted">${L('(ملوش يوزر لسه)', '(no account yet)')}</small>`}</dd>
           <dt>${L('الليدر', 'Leader')}</dt><dd>${t.leader ? `<span class="tk-who">${avatar(who(t.leader), 'xs')}${esc(nameOf(t.leader))}</span>` : '—'}</dd>
           <dt>${L('المشروع', 'Project')}</dt><dd>${t.projectName ? `<a href="#/tasks/projects/${encodeURIComponent(t.projectId)}">${esc(t.projectName)}</a>` : '—'}</dd>
-          <dt>${L('العميل', 'Client')}</dt><dd>${esc(t.clientName || '—')}</dd>
+          <dt>${L('العميل', 'Client')}</dt><dd>${t.clientId ? `<a href="#/tasks/clients/${encodeURIComponent(t.clientId)}">${esc(t.clientName)}</a>` : esc(t.clientName || '—')}</dd>
           <dt>${L('التسليم', 'Due')}</dt><dd>${t.due ? esc(fmtDate(t.due)) : '—'}</dd>
           <dt>${L('اتعمل', 'Created')}</dt><dd>${stamp(toMs(t.createdAt))} · ${esc(first(t.createdBy || ''))}</dd>
           ${t.doneAt ? `<dt>${L('خلص', 'Finished')}</dt><dd>${stamp(toMs(t.doneAt))}</dd>` : ''}

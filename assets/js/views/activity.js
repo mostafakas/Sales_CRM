@@ -38,6 +38,8 @@ const ACTIONS = {
   'chat.archive': ['أرشف محادثة', 'Archived a chat', 'fa-box-archive', 'warn'],
   'chat.group_create': ['عمل جروب شات', 'Created a chat group', 'fa-users', 'brand'],
   'chat.group_update': ['عدّل جروب شات', 'Edited a chat group', 'fa-users-gear', 'info'],
+  'task.link': ['ربط تاسكات بيوزر', 'Linked tasks to an account', 'fa-link', 'info'],
+  'notion.import': ['استيراد من Notion', 'Imported from Notion', 'fa-file-import', 'brand'],
   'task.create': ['عمل تاسك', 'Created a task', 'fa-clipboard-check', 'brand'],
   'task.delete': ['حذف تاسك', 'Deleted a task', 'fa-clipboard-check', 'warn'],
   'task.selftasks': ['غيّر صلاحية التاسكات الشخصية', 'Changed self-task access', 'fa-user-gear', 'info'],

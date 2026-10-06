@@ -475,7 +475,7 @@ service cloud.firestore {
     match /tasks/{id} {
       allow read: if seesTask(resource.data);
       allow create: if active() && taskTextOk(request.resource.data) && request.resource.data.createdBy == me()
-        && request.resource.data.status == 'new' && request.resource.data.num is int
+        && (request.resource.data.status == 'new' || isAdmin() || isPM()) && request.resource.data.num is int   // imports keep their status
         && (isAdmin() || isPM()
           || (request.resource.data.leader == me() && leads(request.resource.data.assignee))
           || (request.resource.data.assignee == me() && prof().get('selfTasks', false) == true && request.resource.data.leader == prof().get('leaderEmail', '')));
@@ -522,6 +522,19 @@ service cloud.firestore {
     // names only (no money) — everyone may read them to filter their tasks; admins / project managers manage them
     match /tk_projects/{id} { allow read: if active(); allow write: if isAdmin() || isPM(); }
     match /tk_clients/{id} { allow read: if active(); allow write: if isAdmin() || isPM(); }
+
+    // ---------- To-Do List: the owner writes; their leader, project managers, HR and admins read ----------
+    function todoOk(d) {
+      return d.text is string && d.text.size() > 0 && d.text.size() <= 500 && d.month is string
+        && d.date is string && d.date.matches(d.month + '-[0-9]{2}') && d.get('note', '') is string && d.get('note', '').size() <= 1000 && d.done is bool;
+    }
+    match /todos/{id} {
+      allow read: if active() && (resource.data.owner == me() || isAdmin() || isPM() || isHR() || resource.data.get('leader', '') == me());
+      allow create: if active() && request.resource.data.owner == me() && request.resource.data.get('leader', '') == prof().get('leaderEmail', '') && todoOk(request.resource.data);
+      allow update: if active() && resource.data.owner == me() && request.resource.data.owner == me()
+        && request.resource.data.get('leader', '') == resource.data.get('leader', '') && todoOk(request.resource.data);
+      allow delete: if active() && resource.data.owner == me();
+    }
 
     // ---------- announcements (admin / HR write; everyone reads and leaves a read mark) ----------
     match /announcements/{id} {
