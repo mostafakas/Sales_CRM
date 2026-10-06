@@ -29,6 +29,8 @@ export default async function render(root) {
       <section class="card" id="prefs"></section>
       <section class="card" style="grid-column:1/-1" id="bal"></section>
     </div>`;
+  let myBirth = '';
+  try { const pv = await read('employees_private', session.email); myBirth = (pv && pv.birthDate) || ''; } catch {}
   function drawInfo() {
     const u = p();
     root.querySelector('#info').innerHTML = `<div class="row gap-16 mb-16">
@@ -40,8 +42,13 @@ export default async function render(root) {
         <dt>${L('القسم', 'Department')}</dt><dd>${esc(u.department || '—')}</dd>
         <dt>${L('المدير المباشر', 'Manager')}</dt><dd>${esc(u.leaderEmail ? nameOf(u.leaderEmail) : '—')}</dd>
         <dt>${L('تاريخ التعيين', 'Hire date')}</dt><dd>${esc(u.hireDate ? fmtDate(u.hireDate) : '—')}</dd>
+        <dt>${L('تاريخ ميلادي', 'My birthday')}</dt><dd><div class="row gap-8"><input class="input" type="date" id="bd" style="max-width:170px" value="${esc(myBirth)}"><button class="btn btn-soft btn-sm" id="bd-save">${L('حفظ', 'Save')}</button></div>
+          <div class="xs muted mt-4">${L('زمايلك هيشوفوا اليوم والشهر بس عشان يهنّوك، والسنة سرية.', 'Colleagues see only the day and month to wish you; the year stays private.')}</div></dd>
         <dt>${L('حصة الأونلاين الشهرية', 'Monthly remote quota')}</dt><dd>${esc(num(u.remoteQuota ?? 0))} ${L('يوم', 'days')}</dd>
       </dl>`;
+    root.querySelector('#bd-save').onclick = (e) => busy(e.currentTarget, async () => {
+      try { const { setMyBirthday } = await import('../services/birthdays.js'); await setMyBirthday(root.querySelector('#bd').value); myBirth = root.querySelector('#bd').value; toast(L('اتحفظ تاريخ ميلادك 🎂', 'Birthday saved 🎂')); } catch (ex) { toastErr(ex); }
+    });
     root.querySelector('#photo').onchange = async (e) => {
       try {
         const data = await imageToDataUrl(e.target.files[0], 240, 0.8);

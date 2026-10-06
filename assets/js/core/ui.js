@@ -66,6 +66,10 @@ export function modal({ title, icon, body = '', foot = '', size = '', locked = f
   return api;
 }
 
+let popChain = Promise.resolve();
+/** Show popups one after another: `show` returns a promise that settles when its popup closes */
+export function queuePopup(show) { popChain = popChain.then(() => show()).catch(e => console.warn('popup', e && e.message)); return popChain; }
+
 export function confirmDialog({ title, message = '', okText, okClass = 'btn-primary', cancelText, input = null } = {}) {
   return new Promise((resolve) => {
     let done = false;

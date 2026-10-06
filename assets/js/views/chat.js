@@ -12,7 +12,7 @@ import {
   otherOf, othersOf, unreadOf, ek, MAX_FILE, isGroup, canManageGroup, isMuted, seenBy, canEditMessage, createGroup, updateGroup, setMuted,
   editMessage, deleteMessage, mentionedMe
 } from '../services/chat.js';
-import { mountTasks } from './chat-tasks.js';
+import { startTasks, allTasks, taskById, taskLink } from '../services/tasks.js';
 import { setTabLabel } from '../tabs.js';
 
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -50,9 +50,11 @@ function richText(m) {
 
 export default async function render(root, { params }) {
   let openId = params && params[0] ? decodeURIComponent(params[0]) : '';
-  let openTaskId = params && params[1] ? decodeURIComponent(params[1]) : ''; // link from a task notification
+  // an old link to a chat task (#/chat/<group>/<task>) now opens the task on the Tasks page
+  if (params && params[1]) { location.replace(taskLink(decodeURIComponent(params[1]))); return () => {}; }
+  startTasks(); // "#" mentions list my tasks
   let mode = 'mine', chats = [], allChats = [], term = '', openChat = null, msgs = [], showArchive = false, archived = [];
-  let unChats = null, unAll = null, unMsgs = null, recorder = null, tasksUi = null;
+  let unChats = null, unAll = null, unMsgs = null, recorder = null;
   const admin = isAdmin();
 
   root.innerHTML = `
@@ -236,7 +238,6 @@ export default async function render(root, { params }) {
   }
   async function openThread(id) {
     if (unMsgs) { unMsgs(); unMsgs = null; }
-    if (tasksUi) { tasksUi.destroy(); tasksUi = null; }
     stopRecording(true);
     openId = id; window.__amOpenChat = id; showArchive = false; archived = [];
     $('#app').classList.toggle('has-open', !!id);
@@ -253,7 +254,6 @@ export default async function render(root, { params }) {
         <div class="row gap-12 grow min0" id="chat-head-main"></div>
         ${admin ? `<div class="row gap-4"><button class="btn btn-sm btn-ghost" id="arch-view" title="${L('الرسائل المؤرشفة', 'Archived messages')}"><i class="fas fa-box-archive"></i><span class="hide-sm"> ${L('الأرشيف', 'Archive')}</span></button><button class="btn btn-sm btn-ghost" id="arch" title="${L('أرشفة المحادثة', 'Archive conversation')}" style="color:var(--bad)"><i class="fas fa-folder-minus"></i><span class="hide-sm"> ${L('أرشفة', 'Archive now')}</span></button></div>` : ''}
       </header>
-      ${isGroup(openChat) ? '<section class="chat-tasks hidden" id="tasks"></section>' : ''}
       <div class="chat-msgs" id="msgs">${loader()}</div>
       ${member ? `<form class="chat-compose" id="compose">
         <div class="chat-upload hidden" id="up"><div class="progress"><span style="width:0%"></span></div><small id="up-t"></small></div>
@@ -268,17 +268,12 @@ export default async function render(root, { params }) {
           <button class="btn btn-primary btn-icon" type="button" id="rec-ok" title="${L('إرسال', 'Send')}"><i class="fas fa-paper-plane" data-flip></i></button></div>
       </form>` : ''}`;
     drawHead();
-    if (isGroup(openChat)) {
-      tasksUi = mountTasks($('#tasks'), { getChat: () => openChat, getMsgs: () => msgs, jumpTo });
-      tasksUi.start(openChat);
-    }
     let known = null;
     unMsgs = watchMessages(id, rows => {
       // a new message from someone else while the conversation is open → soft "receive" sound
       if (known && rows.some(m => !known.has(m.id) && m.by !== session.email) && !isMuted(openChat)) play('receive');
       known = new Set(rows.map(m => m.id));
       msgs = rows; drawMsgs();
-      if (openTaskId && tasksUi) { tasksUi.open(openTaskId); openTaskId = ''; } // after the messages, so "messages about it" is filled
       if (member && !document.hidden) markRead(openChat);
     });
     if (member) wireComposer();
@@ -362,8 +357,8 @@ export default async function render(root, { params }) {
     const find = (id) => [...msgs, ...archived].find(x => x.id === id);
     const tr = e.target.closest('[data-task]');
     if (tr) {
-      const mineTask = tasksUi && tasksUi.list().some(t => t.id === tr.dataset.task);
-      if (mineTask) tasksUi.open(tr.dataset.task);
+      const t = taskById(tr.dataset.task);
+      if (t) location.hash = taskLink(t.id);
       else toast(tr.title || L('تاسك', 'Task'), L('التاسك ده مش مسند ليك — بتشوف عنوانه بس.', 'This task is not assigned to you — you only see its title.'), 'info');
       return;
     }
@@ -495,7 +490,7 @@ export default async function render(root, { params }) {
     if (!openChat || !isGroup(openChat)) return {};
     const mentions = [...picked.people].filter(e => text.includes('@' + nameOf(e)));
     const tasks = new Map([...picked.tasks].filter(([, t]) => new RegExp(`#${t.num}(?![0-9])`).test(text)));
-    const mine = tasksUi ? tasksUi.list() : [];
+    const mine = allTasks();
     (text.match(/#[0-9]+/g) || []).forEach(h => { const t = mine.find(x => `#${x.num}` === h); if (t) tasks.set(t.id, t); });
     return { mentions, tasks: [...tasks.values()].map(t => ({ id: t.id, num: t.num, title: t.title })) };
   }
@@ -529,8 +524,8 @@ export default async function render(root, { params }) {
         suggest.items = othersOf(openChat).map(e => ({ kind: '@', email: e, p: who(e), name: nameOf(e) }))
           .filter(x => !token.q || x.name.toLowerCase().includes(token.q) || x.email.includes(token.q)).sort((a, b) => a.name.localeCompare(b.name, 'ar')).slice(0, 8);
       } else {
-        const STATUS = { new: 'New', in_progress: 'In progress', done: 'Finished' };
-        suggest.items = (tasksUi ? tasksUi.list() : []).slice().sort((a, b) => b.num - a.num)
+        const STATUS = { new: 'New', in_progress: 'In progress', review: 'Review', hold: 'On hold', done: 'Finished' };
+        suggest.items = allTasks().filter(t => t.status !== 'done').slice().sort((a, b) => b.num - a.num)
           .filter(t => !token.q || String(t.num).startsWith(token.q) || t.title.toLowerCase().includes(token.q))
           .slice(0, 8).map(t => ({ kind: '#', id: t.id, num: t.num, task: t, status: `${STATUS[t.status] || ''}${t.assignee !== session.email ? ' · ' + nameOf(t.assignee) : ''}` }));
       }
@@ -565,7 +560,7 @@ export default async function render(root, { params }) {
       else if (!c && openChat && mode !== 'all' && openChat.members.includes(session.email)) { openChat = null; location.hash = '#/chat'; } // removed from the group
     }
   });
-  const offDir = onDirectory(() => { drawList(); if (tasksUi) tasksUi.redraw(); });
+  const offDir = onDirectory(() => { drawList(); });
   const onVis = () => { if (!document.hidden && openChat) markRead(openChat); };
   document.addEventListener('visibilitychange', onVis);
   if (openId) {
@@ -575,7 +570,6 @@ export default async function render(root, { params }) {
 
   return () => {
     stopRecording(true);
-    if (tasksUi) tasksUi.destroy();
     unChats && unChats(); unAll && unAll(); unMsgs && unMsgs(); offDir && offDir();
     document.removeEventListener('click', closePicker); document.removeEventListener('visibilitychange', onVis);
     window.__amOpenChat = '';

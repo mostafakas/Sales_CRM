@@ -97,8 +97,12 @@ service cloud.firestore {
          && request.resource.data.get('role', '') != 'admin'
          && (!('role' in affected()) || (!(resource.data.get('role', '') in ['finance', 'pm']) && !(request.resource.data.role in ['finance', 'pm'])))
          && payrollOf(request.resource.data) == payrollOf(resource.data)
+         && request.resource.data.get('permissions', {}).get('dashboard', false) == resource.data.get('permissions', {}).get('dashboard', false)
          && (email != me() || !affected().hasAny(['role', 'permissions', 'isSuspended']))
       ));
+
+      // A leader may let a team member create tasks for themselves
+      allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['selfTasks']) && request.resource.data.selfTasks is bool;
 
       // A leader may clear the "remote pending" flag for a team member
       allow update: if active() && resource.data.get('leaderEmail', '') == me() && onlyChanged(['remotePending'])
@@ -117,7 +121,8 @@ service cloud.firestore {
       allow update: if signedIn() && email == me()
         && resource.data.get('isSuspended', false) != true
         && onlyChanged(['status', 'lastChange', 'lastChangeClient', 'timeBank', 'firstOnlineAt', 'dayKey', 'workLocation',
-                        'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword', 'shift'])
+                        'remotePending', 'checkedOut', 'sessionId', 'lastLoginAt', 'photo', 'lang', 'mustChangePassword', 'shift', 'birthday'])
+        && (!('birthday' in affected()) || request.resource.data.birthday == '' || request.resource.data.birthday.matches('^[0-9]{2}-[0-9]{2}$'))
         && (!('status' in affected()) || request.resource.data.status in ['Online', 'Break', 'Meeting', 'Offline'])
         && (!('dayKey' in affected()) || request.resource.data.dayKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
         && (!('lastChange' in affected()) || request.resource.data.lastChange == request.time)
@@ -143,9 +148,11 @@ service cloud.firestore {
       // finance keeps just the freelancer "agreed amount" (Treasury → Freelancers)
       allow update: if isFinance() && email != me() && onlyChanged(['flCredit']);
       // employees may set their own recovery email (used for "Forgot password?")
-      allow create: if active() && email == me() && request.resource.data.keys().hasOnly(['email', 'contactEmail', 'updatedAt'])
-        && request.resource.data.email == me() && recoveryOk(request.resource.data);
-      allow update: if active() && email == me() && onlyChanged(['contactEmail', 'updatedAt']) && recoveryOk(request.resource.data);
+      allow create: if active() && email == me() && request.resource.data.keys().hasOnly(['email', 'contactEmail', 'updatedAt', 'birthDate'])
+        && request.resource.data.email == me() && recoveryOk(request.resource.data) && birthOk(request.resource.data);
+      allow update: if active() && email == me() && onlyChanged(['contactEmail', 'updatedAt', 'birthDate', 'email']) && request.resource.data.email == me()
+        && recoveryOk(request.resource.data) && birthOk(request.resource.data);
+      function birthOk(d) { return d.get('birthDate', '') == '' || (d.birthDate is string && d.birthDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')); }
     }
 
     // ---------- settings ----------
@@ -447,6 +454,102 @@ service cloud.firestore {
       allow read: if isHR();
       allow create: if (isHR() || isFinance()) && request.resource.data.by == me();
       allow update, delete: if false;
+    }
+
+    // ---------- tasks, projects, clients ----------
+    // employee: tasks assigned to them · leader: tasks whose leader is them · admin / project manager: everything
+    function taskOf(id) { return get(/databases/$(database)/documents/tasks/$(id)).data; }
+    function seesTask(t) { return active() && (isAdmin() || isPM() || isHR() || t.assignee == me() || t.get('leader', '') == me()); }   // HR: read-only (dashboard)
+    function taskTextOk(d) {
+      return d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.get('details', '') is string && d.get('details', '').size() <= 6000
+        && d.get('checklist', []) is list && d.get('checklist', []).size() <= 50
+        && d.status in ['new', 'in_progress', 'review', 'hold', 'done']
+        && d.get('priority', 'normal') in ['normal', 'high', 'urgent']
+        && d.get('doneNote', '').size() <= 1000 && d.get('returnReason', '').size() <= 1000 && d.get('holdReason', '').size() <= 1000;
+    }
+    // what the assignee may do alone: New → In progress / Review / On hold, In progress → Review / On hold, On hold → In progress
+    function assigneeMoveOk(a, b) {
+      return a == b || (a == 'new' && b in ['in_progress', 'review', 'hold']) || (a == 'in_progress' && b in ['review', 'hold']) || (a == 'hold' && b == 'in_progress');
+    }
+    match /tasks/{id} {
+      allow read: if seesTask(resource.data);
+      allow create: if active() && taskTextOk(request.resource.data) && request.resource.data.createdBy == me()
+        && request.resource.data.status == 'new' && request.resource.data.num is int
+        && (isAdmin() || isPM()
+          || (request.resource.data.leader == me() && leads(request.resource.data.assignee))
+          || (request.resource.data.assignee == me() && prof().get('selfTasks', false) == true && request.resource.data.leader == prof().get('leaderEmail', '')));
+      allow update: if active() && taskTextOk(request.resource.data)
+        && request.resource.data.num == resource.data.num && request.resource.data.createdBy == resource.data.createdBy && (
+             isAdmin() || isPM()
+          // the task's leader: everything, within their team
+          || (resource.data.get('leader', '') == me() && request.resource.data.leader == me()
+              && (request.resource.data.assignee == resource.data.assignee || leads(request.resource.data.assignee)))
+          // a task I made for myself
+          || (resource.data.createdBy == me() && resource.data.assignee == me() && request.resource.data.assignee == me() && request.resource.data.leader == resource.data.get('leader', ''))
+          // the assignee: status (limited moves), checklist ticks, comment counter
+          || (resource.data.assignee == me() && request.resource.data.assignee == me() && request.resource.data.get('leader', '') == resource.data.get('leader', '')
+              && onlyChanged(['status', 'updatedAt', 'history', 'checklist', 'holdReason', 'reviewAt', 'commentsCount'])
+              && assigneeMoveOk(resource.data.status, request.resource.data.status)));
+      allow delete: if active() && (isAdmin() || isPM() || resource.data.get('leader', '') == me()
+        || (resource.data.createdBy == me() && resource.data.assignee == me()));
+      match /comments/{c} {
+        allow read: if seesTask(taskOf(id));
+        allow create: if seesTask(taskOf(id)) && request.resource.data.by == me() && request.resource.data.at == request.time
+          && request.resource.data.text is string && request.resource.data.text.size() <= 3000;
+        allow delete: if active() && (resource.data.by == me() || isAdmin());
+      }
+    }
+    match /task_files/{f} {
+      allow read: if seesTask(taskOf(resource.data.taskId));
+      allow create: if seesTask(taskOf(request.resource.data.taskId)) && request.resource.data.by == me()
+        && request.resource.data.size is number && request.resource.data.size <= 5300000 && request.resource.data.chunks is int && request.resource.data.chunks <= 10;
+      allow delete: if isAdmin();
+      match /chunks/{i} {
+        function fileOf() { return get(/databases/$(database)/documents/task_files/$(f)).data; }
+        allow read: if seesTask(taskOf(fileOf().taskId));
+        allow create: if active() && fileOf().by == me() && request.resource.data.data is string && request.resource.data.data.size() <= 700000;
+        allow delete: if isAdmin();
+      }
+    }
+    // one shared counter for task numbers
+    match /counters/{k} {
+      allow read: if active();
+      allow write: if active() && k == 'tasks' && request.resource.data.seq is int
+        && request.resource.data.seq > (resource == null ? 0 : resource.data.get('seq', 0))
+        && request.resource.data.seq <= (resource == null ? 0 : resource.data.get('seq', 0)) + 500;
+    }
+    // names only (no money) — everyone may read them to filter their tasks; admins / project managers manage them
+    match /tk_projects/{id} { allow read: if active(); allow write: if isAdmin() || isPM(); }
+    match /tk_clients/{id} { allow read: if active(); allow write: if isAdmin() || isPM(); }
+
+    // ---------- announcements (admin / HR write; everyone reads and leaves a read mark) ----------
+    match /announcements/{id} {
+      allow read: if active();
+      allow create: if isHR() && request.resource.data.createdBy == me()
+        && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 150
+        && request.resource.data.get('body', '').size() <= 5000 && request.resource.data.get('image', '').size() < 1000000;
+      allow update: if isHR() && request.resource.data.get('image', '').size() < 1000000;
+      // a reader adds one to the counter, once, together with their read mark
+      allow update: if active() && onlyChanged(['readCount'])
+        && request.resource.data.readCount == resource.data.get('readCount', 0) + 1
+        && !exists(/databases/$(database)/documents/announcements/$(id)/reads/$(me()))
+        && existsAfter(/databases/$(database)/documents/announcements/$(id)/reads/$(me()));
+      allow delete: if isHR();
+      match /reads/{email} {
+        allow read: if isHR() || email == me();
+        allow create: if active() && email == me() && request.resource.data.email == me();
+      }
+    }
+    match /ann_seen/{email} { allow read, write: if active() && email == me(); }
+
+    // ---------- birthday wishes: {to}_{year}_{from} ----------
+    match /birthday_wishes/{id} {
+      allow read: if active() && (resource.data.to == me() || resource.data.from == me() || isAdmin());
+      allow create, update: if active() && request.resource.data.from == me() && request.resource.data.to != me()
+        && request.resource.data.year is int && id == request.resource.data.to + '_' + string(request.resource.data.year) + '_' + me()
+        && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500;
+      allow delete: if active() && resource.data.from == me();
     }
 
     // ---------- CRM / sales apps ----------

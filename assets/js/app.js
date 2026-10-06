@@ -13,12 +13,15 @@ import { initTabs, enterTab, restoreScroll } from './tabs.js';
 const ROUTES = [
   { id: 'home', group: 'me', icon: 'fa-house', ar: 'يومي', en: 'My day', load: () => import('./views/home.js'), bottom: true },
   { id: 'chat', group: 'me', icon: 'fa-comments', ar: 'الشات', en: 'Chat', load: () => import('./views/chat.js'), badge: 'chat', bottom: true },
+  { id: 'tasks', group: 'me', icon: 'fa-clipboard-check', ar: 'التاسكات', en: 'Tasks', load: () => import('./views/tasks.js'), badge: 'tasks' },
+  { id: 'announcements', group: 'me', icon: 'fa-bullhorn', ar: 'الإعلانات', en: 'Announcements', load: () => import('./views/announcements.js'), badge: 'ann' },
   { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
   { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js') },
   { id: 'payslips', group: 'me', icon: 'fa-receipt', ar: 'قسائم الراتب', en: 'Payslips', load: () => import('./views/payslips.js') },
   { id: 'profile', group: 'me', icon: 'fa-circle-user', ar: 'حسابي', en: 'My profile', load: () => import('./views/profile.js') },
   { id: 'notifications', group: null, icon: 'fa-bell', ar: 'الإشعارات', en: 'Notifications', load: () => import('./views/notifications.js') },
 
+  { id: 'dashboard', group: 'team', icon: 'fa-chart-pie', ar: 'الداشبورد', en: 'Dashboard', when: () => isAdmin() || isHR() || !!(session.profile && session.profile.permissions && session.profile.permissions.dashboard), load: () => import('./views/dashboard.js') },
   { id: 'monitor', group: 'team', icon: 'fa-signal', ar: 'المتابعة اللحظية', en: 'Live monitor', when: () => isLeader() || seesAll(), load: () => import('./views/monitor.js') },
   { id: 'approvals', group: 'team', icon: 'fa-inbox', ar: 'الموافقات', en: 'Approvals', when: canApprove, load: () => import('./views/approvals.js'), badge: 'inbox', bottom: true },
   { id: 'leaves', group: 'team', icon: 'fa-umbrella-beach', ar: 'الإجازات والأرصدة', en: 'Leaves & balances', when: () => isLeader() || seesAll(), load: () => import('./views/leaves.js') },
@@ -40,7 +43,7 @@ const GROUPS = {
 };
 
 let current = null; // { id, cleanup }
-let inboxCount = 0, chatCount = 0;
+let inboxCount = 0, chatCount = 0, annCount = 0, taskCount = 0;
 const allowed = (r) => !r.when || r.when();
 
 function renderNav() {
@@ -82,6 +85,8 @@ function renderUserChip() {
 }
 function setBadges() {
   document.querySelectorAll('[data-badge="inbox"]').forEach(b => { b.textContent = inboxCount; b.classList.toggle('hidden', !inboxCount); });
+  document.querySelectorAll('[data-badge="ann"]').forEach(b => { b.textContent = annCount; b.classList.toggle('hidden', !annCount); });
+  document.querySelectorAll('[data-badge="tasks"]').forEach(b => { b.textContent = taskCount > 99 ? '99+' : taskCount; b.classList.toggle('hidden', !taskCount); });
   const n = unreadCount();
   const bc = byId('bell-count'); bc.textContent = n > 9 ? '9+' : n; bc.classList.toggle('hidden', !n);
   document.querySelectorAll('[data-badge="chat"]').forEach(b => { b.textContent = chatCount > 99 ? '99+' : chatCount; b.classList.toggle('hidden', !chatCount); });
@@ -120,6 +125,22 @@ async function startChatWatcher() {
       popup(c, lm);
     });
     seen = newest;
+  });
+}
+
+/** Announcements: unread badge, and an "important" one pops up until the reader confirms it */
+async function startAnnouncementWatcher() {
+  const svc = await import('./services/announcements.js');
+  svc.startAnnouncements();
+  const shown = new Set();
+  let busy = false;
+  svc.onAnnouncements(async () => {
+    annCount = svc.unread().length; setBadges();
+    if (busy || (current && current.id === 'announcements')) return;
+    const next = svc.unread().find(a => a.important && !shown.has(a.id));
+    if (!next) return;
+    busy = true; shown.add(next.id);
+    try { const { importantPopup } = await import('./views/announcements.js'); const { queuePopup } = await import('./core/ui.js'); await queuePopup(() => importantPopup(next)); } finally { busy = false; }
   });
 }
 
@@ -237,6 +258,8 @@ async function boot() {
   window.addEventListener('am:late-error', (e) => toastErr(e.detail, L('ما اتحفظش', 'Not saved')));
   startNotifications();
   startChatWatcher().catch(e => console.warn('chat', e && e.message));
+  startAnnouncementWatcher().catch(e => console.warn('announcements', e && e.message));
+  import('./services/tasks.js').then(t => { t.startTasks(); t.onTasks(() => { taskCount = t.badgeCount(); setBadges(); }); }).catch(e => console.warn('tasks', e && e.message));
   onNotifications(setBadges);
   if (canApprove()) watchInbox(rows => { inboxCount = rows.length; setBadges(); });
   renderNav();
@@ -247,6 +270,7 @@ async function boot() {
   await route();
   const s = byId('splash'); s.style.opacity = '0'; setTimeout(() => s.remove(), 300);
   if (session.profile && session.profile.mustChangePassword) forcePasswordChange();
+  else import('./views/birthdays.js').then(m => m.birthdayGreeter()).catch(e => console.warn('birthdays', e && e.message));
   setupCheck();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   watchForcedReload();

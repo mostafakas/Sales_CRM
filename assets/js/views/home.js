@@ -16,16 +16,28 @@ export default async function render(root) {
   root.innerHTML = `
     <div class="grid" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:start" id="home-grid">
       <div class="col gap-16">
+        <a class="ann-banner hidden" id="ann-banner" href="#/announcements"></a>
         <section class="hero" id="hero"></section>
         <section class="card" id="pad-card"></section>
         <section class="grid g-3 keep-2" id="stats"></section>
       </div>
       <div class="col gap-16">
+        <section class="card hidden" id="bday"></section>
         <section class="card" id="quick"></section>
         <section class="card" id="upcoming"></section>
         <section class="card" id="log"></section>
       </div>
     </div>`;
+  // the newest unread announcement on top, and the birthdays of today and this week
+  import('../services/announcements.js').then(svc => {
+    const el = root.querySelector('#ann-banner');
+    unsubs.push(svc.onAnnouncements(() => {
+      const u = svc.unread(); const a = u[0];
+      el.classList.toggle('hidden', !a);
+      if (a) el.innerHTML = `<span class="icon-tile ${a.important ? 'bad' : ''}"><i class="fas fa-bullhorn"></i></span><span class="grow min0"><small>${u.length > 1 ? L(`${u.length} إعلانات جديدة`, `${u.length} new announcements`) : L('إعلان جديد', 'New announcement')}</small><b class="truncate">${esc(a.title)}</b></span><i class="fas fa-chevron-left" data-flip></i>`;
+    }));
+  });
+  import('./birthdays.js').then(b => { const redraw = b.mountBirthdayCard(root.querySelector('#bday')); import('../services/directory.js').then(d => unsubs.push(d.onDirectory(redraw))); });
   const mq = matchMedia('(max-width: 1100px)');
   const fit = () => { root.querySelector('#home-grid').style.gridTemplateColumns = mq.matches ? 'minmax(0,1fr)' : 'minmax(0,1.6fr) minmax(0,1fr)'; };
   fit(); mq.addEventListener('change', fit); unsubs.push(() => mq.removeEventListener('change', fit));

@@ -108,6 +108,8 @@ export async function openEditor(email) {
           <div class="field"><label>${L('الموبايل', 'Mobile')}</label><input class="input" name="phone" dir="ltr" value="${esc(priv.phone || '')}"></div>
           <div class="field"><label>${L('النوع', 'Gender')}</label><select class="select" name="gender"><option value="male" ${u.gender !== 'female' ? 'selected' : ''}>${L('ذكر', 'Male')}</option><option value="female" ${u.gender === 'female' ? 'selected' : ''}>${L('أنثى', 'Female')}</option></select></div>
           <div class="field"><label>${L('تاريخ التعيين', 'Hire date')}</label><input class="input" type="date" name="hireDate" value="${esc(u.hireDate || '')}"></div>
+          <div class="field"><label>${L('تاريخ الميلاد', 'Birth date')}</label><input class="input" type="date" name="birthDate" value="${esc(priv.birthDate || '')}">
+            <div class="xs muted mt-4">${L('الكل بيشوف اليوم والشهر بس (عشان التهنئة)، والسنة سرية.', 'Everyone sees only the day and month (for wishes); the year stays private.')}</div></div>
           <div class="field"><label>${L('نوع التعاقد', 'Contract')}</label><select class="select" name="contract">${[['fulltime', L('دوام كامل', 'Full-time')], ['parttime', L('دوام جزئي', 'Part-time')], ['freelancer', L('فريلانسر', 'Freelancer')], ['intern', L('متدرب', 'Intern')]].map(([v, t]) => `<option value="${v}" ${(priv.contract || 'fulltime') === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
         </div>
         <div data-pane="job" class="form-grid hidden">
@@ -192,6 +194,7 @@ export async function openEditor(email) {
               <label class="check"><input type="checkbox" id="rp-mail" ${priv.contactEmail ? 'checked' : ''}> ${L('وابعته على إيميل الاستعادة كمان', 'Also email it to the recovery email')}</label></div></div><div class="divider"></div>` : ''}
           <div class="row between"><div><b>${L('صلاحية الـ CRM', 'CRM access')}</b><div class="xs muted">${L('فتح تطبيق المبيعات', 'Open the sales app')}</div></div><label class="switch"><input type="checkbox" name="crm" ${u.permissions && u.permissions.crm ? 'checked' : ''}><span></span></label></div>
           <div class="field"><label>${L('دوره في الـ CRM', 'CRM role')}</label><select class="select" name="crmRole">${['agent', 'supervisor', 'admin'].map(r => `<option value="${r}" ${((u.permissions && u.permissions.crmRole) || 'agent') === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+          <div class="row between"><div><b>${L('يشوف الداشبورد', 'Sees the dashboard')}</b><div class="xs muted">${L('لليدر: أرقام فريقه بس (الأدمن والـ HR بيشوفوه دايماً)', 'For a leader: their team only (admins and HR always see it)')}</div></div><label class="switch"><input type="checkbox" name="dashboard" ${u.permissions && u.permissions.dashboard ? 'checked' : ''} ${isAdmin() ? '' : 'disabled'}><span></span></label></div>
           <div class="row between"><div><b>${L('صلاحية الرواتب والخزينة', 'Payroll & treasury access')}</b><div class="xs muted">${L('لموظفي المالية', 'For finance staff')}</div></div><label class="switch"><input type="checkbox" name="payroll" ${u.permissions && u.permissions.payroll ? 'checked' : ''} ${isAdmin() ? '' : 'disabled'}><span></span></label></div>
           ${isAdmin() ? '' : `<p class="xs muted"><i class="fas fa-lock"></i> ${L('صلاحية الرواتب ودور «المالية» و«مدير المشروعات» بيمنحهم الأدمن بس.', 'Payroll access and the Finance and Project manager roles can only be granted by an admin.')}</p>`}
           ${isNew ? '' : `<div class="divider"></div>
@@ -325,16 +328,16 @@ export async function openEditor(email) {
     };
     const pub = {
       name: val('name'), title: val('title'), department: val('department'), role: f.role.value, leaderEmail: val('leaderEmail'),
-      gender: f.gender.value, hireDate: val('hireDate'), remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
+      gender: f.gender.value, hireDate: val('hireDate'), birthday: val('birthDate') ? val('birthDate').slice(5) : '', remoteQuota: Number(val('remoteQuota') || 0), photo, trackAttendance: f.trackAttendance.checked,
       workStart: val('workStart'), workEnd: val('workEnd'),
       graceMinutes: val('graceMinutes') === '' ? null : Math.max(0, Math.min(120, Number(val('graceMinutes')) || 0)),
-      permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: isAdmin() ? f.payroll.checked : !!(u.permissions && u.permissions.payroll) }, updatedAt: serverTimestamp()
+      permissions: { crm: f.crm.checked, crmRole: f.crmRole.value, payroll: isAdmin() ? f.payroll.checked : !!(u.permissions && u.permissions.payroll), dashboard: isAdmin() ? f.dashboard.checked : !!(u.permissions && u.permissions.dashboard) }, updatedAt: serverTimestamp()
     };
     // a non-admin cannot change their own role, access or suspension (the rules reject it)
     if (!isNew && email === session.email && !isAdmin()) { delete pub.role; delete pub.permissions; delete pub.isSuspended; }
     if (!isNew && !(email === session.email && !isAdmin())) pub.isSuspended = !!(f.isSuspended && f.isSuspended.checked);
     const privData = {
-      email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value, contactEmail,
+      email: newEmail, phone: val('phone'), bank: val('bank'), instapay: val('instapay'), contract: f.contract.value, contactEmail, birthDate: val('birthDate'),
       // basic kept as a plain number too, for anything that still reads salary.basic; the old allowance list is replaced by the parts
       salary: { total: st.total, parts: st.parts, basic: st.amounts.basic, fixedDeductions: Number(val('fixedDeductions') || 0), allowances: [] },
       rules: newRules, updatedAt: serverTimestamp()
