@@ -35,6 +35,15 @@ export function managedPeople() {
   return activePeople().filter(p => p.leaderEmail === session.email);
 }
 export const teamOf = (leaderEmail) => activePeople().filter(p => p.leaderEmail === leaderEmail);
+/** managedPeople() + for a team supervisor, the teams of the leaders under them (two levels) */
+export function supervisedPeople() {
+  const direct = managedPeople();
+  if (seesAll() || session.role !== 'team_supervisor') return direct;
+  const leads = new Set(direct.map(p => p.email));
+  return [...direct, ...activePeople().filter(p => leads.has(p.leaderEmail) && p.email !== session.email)];
+}
+/** the team supervisor above a leader ('' when that leader's manager is not a team supervisor) */
+export const supervisorOf = (leaderEmail) => { const l = leaderEmail && person(leaderEmail); const s = l && l.leaderEmail && person(l.leaderEmail); return s && s.role === 'team_supervisor' ? s.email : ''; };
 export function departments() {
   const s = new Set(); people.forEach(p => p.department && s.add(p.department));
   return [...s].sort();

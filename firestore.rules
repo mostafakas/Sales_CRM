@@ -459,7 +459,7 @@ service cloud.firestore {
     // ---------- tasks, projects, clients ----------
     // employee: tasks assigned to them · leader: tasks whose leader is them · admin / project manager: everything
     function taskOf(id) { return get(/databases/$(database)/documents/tasks/$(id)).data; }
-    function seesTask(t) { return active() && (isAdmin() || isPM() || isHR() || t.assignee == me() || t.get('leader', '') == me()); }   // HR: read-only (dashboard)
+    function seesTask(t) { return active() && (isAdmin() || isPM() || isHR() || t.assignee == me() || t.get('leader', '') == me() || t.get('supervisor', '') == me()); }   // HR: read-only (dashboard)
     function taskTextOk(d) {
       return d.title is string && d.title.size() > 0 && d.title.size() <= 200
         && d.get('details', '') is string && d.get('details', '').size() <= 6000

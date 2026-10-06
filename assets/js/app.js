@@ -260,7 +260,7 @@ async function boot() {
   startNotifications();
   startChatWatcher().catch(e => console.warn('chat', e && e.message));
   startAnnouncementWatcher().catch(e => console.warn('announcements', e && e.message));
-  import('./services/tasks.js').then(t => { t.startTasks(); t.onTasks(() => { taskCount = t.badgeCount(); setBadges(); }); }).catch(e => console.warn('tasks', e && e.message));
+  import('./services/tasks.js').then(t => { t.startTasks(); t.onTasks(() => { taskCount = t.badgeCount(); setBadges(); if (isAdmin()) t.syncSupervisors().catch(e => console.warn('supervisors', e && e.message)); }); }).catch(e => console.warn('tasks', e && e.message));
   onNotifications(setBadges);
   if (canApprove()) watchInbox(rows => { inboxCount = rows.length; setBadges(); });
   renderNav();

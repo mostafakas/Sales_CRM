@@ -10,7 +10,7 @@ import { session, now, isAdmin, isPM, isHR } from '../core/session.js';
 import { userError } from '../core/ui.js';
 import { L, ymd } from '../core/utils.js';
 import { dayKey } from '../core/policy.js';
-import { person, nameOf, activePeople } from './directory.js';
+import { person, nameOf, activePeople, supervisorOf } from './directory.js';
 import { notifyMany } from './notify.js';
 import { track } from './activity.js';
 
@@ -81,9 +81,11 @@ export function startTasks() {
   const merge = (parts) => { const m = new Map(); parts.forEach(p => p.forEach(t => m.set(t.id, t))); tasks = [...m.values()].sort((a, b) => (b.num || 0) - (a.num || 0)); emit(); };
   if (seesAllTasks() || isHR()) watch(col('tasks'), rows => merge([rows]), () => merge([]));   // HR: read-only, for the dashboard
   else {
-    let mine = [], led = [];
-    watch(query(col('tasks'), where('assignee', '==', session.email)), rows => { mine = rows; merge([mine, led]); }, () => {});
-    watch(query(col('tasks'), where('leader', '==', session.email)), rows => { led = rows; merge([mine, led]); }, () => {});
+    let mine = [], led = [], sup = [];
+    watch(query(col('tasks'), where('assignee', '==', session.email)), rows => { mine = rows; merge([mine, led, sup]); }, () => {});
+    watch(query(col('tasks'), where('leader', '==', session.email)), rows => { led = rows; merge([mine, led, sup]); }, () => {});
+    // a team supervisor also sees the tasks the leaders under them gave (task.supervisor)
+    if (session.role === 'team_supervisor') watch(query(col('tasks'), where('supervisor', '==', session.email)), rows => { sup = rows; merge([mine, led, sup]); }, () => {});
   }
   watch(col('tk_projects'), rows => { projects = rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); emit(); }, () => {});
   watch(col('tk_clients'), rows => { clients = rows.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar')); emit(); }, () => {});
@@ -133,7 +135,7 @@ export async function createTasks(fields, assignees) {
     // the responsible leader: me when I lead them, else their own leader (a self task goes to my leader)
     const leader = email === session.email ? (p.leaderEmail || '') : (p.leaderEmail === session.email ? session.email : (p.leaderEmail || session.email));
     const ref = doc(col('tasks'));
-    const t = { ...base, num: nums[i], assignee: email, leader, createdBy: session.email, status: 'new', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    const t = { ...base, num: nums[i], assignee: email, leader, supervisor: supervisorOf(leader), createdBy: session.email, status: 'new', createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       doneAt: null, doneNote: '', returnReason: '', holdReason: '', commentsCount: 0, history: [{ by: session.email, from: '', to: 'new', at: now(), note: '' }] };
     b.set(ref, t);
     return { id: ref.id, ...t };
@@ -229,6 +231,20 @@ export async function loadFile(meta) {
   return url;
 }
 
+/** Admin: keep task.supervisor right as people move between leaders / supervisors (only the changes are written) */
+let synced = false;
+export async function syncSupervisors() {
+  if (synced || !isAdmin() || !tasks.length) return 0;
+  synced = true;
+  const diff = tasks.filter(t => (t.supervisor || '') !== supervisorOf(t.leader || ''));
+  for (let i = 0; i < diff.length; i += 400) {
+    const b = writeBatch(db);
+    diff.slice(i, i + 400).forEach(t => b.update(doc(db, 'tasks', t.id), { supervisor: supervisorOf(t.leader || '') }));
+    await b.commit();
+  }
+  return diff.length;
+}
+
 // ---------- people imported by name (no account yet) ----------
 /** names that own tasks / lead projects but have no account yet, with how many tasks each */
 export function pendingPeople() {
@@ -265,7 +281,7 @@ export async function linkPending(name, email) {
   const ps = projects.filter(x => (x.pendingMembers || []).includes(name) || x.pendingLeader === name);
   for (let i = 0; i < ts.length; i += 400) {
     const b = writeBatch(db);
-    ts.slice(i, i + 400).forEach(t => b.update(doc(db, 'tasks', t.id), { assignee: email, leader: p.leaderEmail || '', pendingAssignee: '', updatedAt: serverTimestamp(),
+    ts.slice(i, i + 400).forEach(t => b.update(doc(db, 'tasks', t.id), { assignee: email, leader: p.leaderEmail || '', supervisor: supervisorOf(p.leaderEmail || ''), pendingAssignee: '', updatedAt: serverTimestamp(),
       history: arrayUnion({ by: session.email, from: t.status, to: t.status, at: now(), note: L(`اتسند لـ ${nameOf(email)} (كان باسم ${name})`, `assigned to ${nameOf(email)} (was "${name}")`) }) }));
     await b.commit();
   }

@@ -4,7 +4,7 @@ import { toast, toastErr, avatar, STATUS_META, empty, confirmDialog, bindActions
 import { session, now, isHR, seesAll } from '../core/session.js';
 import { dayKey, planFor, lateness, modeLabel, roleLabel, isWorkingPlan, policy, leaveType, withShift } from '../core/policy.js';
 import { toMs, list, query, col, where } from '../core/fb.js';
-import { onDirectory, managedPeople, departments } from '../services/directory.js';
+import { onDirectory, supervisedPeople as managedPeople, departments } from '../services/directory.js';
 import { liveBank, staleDay, closeStaleDay, changeStatus, resetLive, COUNTED } from '../services/attendance.js';
 import { showDayDetails } from './attendance.js';
 import { classifyDay } from '../services/reports.js';

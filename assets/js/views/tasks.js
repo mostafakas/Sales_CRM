@@ -3,7 +3,7 @@
 import { L, esc, fmtDate, ymd, addDays, debounce } from '../core/utils.js';
 import { toast, toastErr, avatar, empty, modal, busy, confirmDialog } from '../core/ui.js';
 import { session, now, isAdmin, isHR } from '../core/session.js';
-import { activePeople, person, nameOf, onDirectory } from '../services/directory.js';
+import { activePeople, person, nameOf, onDirectory, supervisedPeople } from '../services/directory.js';
 import {
   STATUS, ORDER, PRIORITY, PROJECT_STATUS, startTasks, onTasks, allTasks, allProjects, allClients, projectById, clientById, isLate, doneDay, canMove,
   canCreate, canManageProjects, seesAllTasks, saveProject, deleteProject, saveClient, deleteClient, importFromCrm, migrateChatTasks, setSelfTasks, taskById, pendingPeople
@@ -367,7 +367,7 @@ function teamTab(body, actions) {
   const ym = ymd(now()).slice(0, 7), today = ymd(now());
   let todos = [], sortBy = 'late';
   const un = watchMonth(ym, rows => { todos = rows; draw(); });
-  const people = () => (seesAllTasks() || isHR()) ? activePeople() : activePeople().filter(p => p.leaderEmail === session.email);
+  const people = () => (seesAllTasks() || isHR()) ? activePeople() : supervisedPeople();
   function stats(p) {
     const ts = allTasks().filter(t => t.assignee === p.email);
     const open = ts.filter(t => t.status !== 'done');

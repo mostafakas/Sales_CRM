@@ -78,6 +78,7 @@ export const ROLE_META = {
   employee: { ar: 'موظف', en: 'Employee' },
   leader: { ar: 'مدير فريق', en: 'Team leader' },
   sales_manager: { ar: 'مدير السيلز', en: 'Sales manager' },   // a team leader for the sales team
+  team_supervisor: { ar: 'سوبر فايزر', en: 'Team supervisor' },  // leads the leaders; sees their teams too (monitor, tasks)
   pm: { ar: 'مدير المشروعات', en: 'Project manager' },
   hr: { ar: 'موارد بشرية', en: 'HR' },
   finance: { ar: 'المالية', en: 'Finance' },

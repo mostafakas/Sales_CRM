@@ -6,7 +6,7 @@ import { db, doc, col, writeBatch, serverTimestamp, Timestamp, list, setDoc } fr
 import { session, now, isAdmin, isPM } from '../core/session.js';
 import { userError } from '../core/ui.js';
 import { L, cairoMs } from '../core/utils.js';
-import { person } from './directory.js';
+import { person, supervisorOf } from './directory.js';
 import { allTasks, allProjects, allClients, nextNums, guessPerson } from './tasks.js';
 import { track } from './activity.js';
 
@@ -217,7 +217,7 @@ export async function runImport(pl, onProgress = () => {}) {
         if (t.status !== 'new') hist.push({ by: session.email, from: 'new', to: t.status, at: doneMs || now(), note: 'Notion' });
         b.set(doc(col('tasks')), {
           num: nums[i + k], title: t.title, details: t.details, priority: t.priority, due: t.due, status: t.status,
-          assignee: t.assignee, pendingAssignee: t.pendingAssignee, leader, createdBy: session.email,
+          assignee: t.assignee, pendingAssignee: t.pendingAssignee, leader, supervisor: supervisorOf(leader), createdBy: session.email,
           projectId: pr ? pr.id : '', projectName: pr ? pr.name : t.projectName, clientId: pr ? pr.clientId || '' : '', clientName: pr ? pr.clientName || '' : '',
           checklist: [], commentsCount: 0, doneAt: doneMs ? Timestamp.fromMillis(doneMs) : null, doneNote: '', returnReason: '', holdReason: '',
           history: hist, notionKey: t.notionKey, source: 'notion', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
