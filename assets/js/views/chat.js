@@ -5,6 +5,7 @@ import { L, esc, fmtTime, fmtDate, ymd, relTime, debounce, imageToDataUrl } from
 import { toast, toastErr, avatar, empty, loader, confirmDialog, modal, busy, STATUS_META } from '../core/ui.js';
 import { session, now, isAdmin } from '../core/session.js';
 import { read, toMs } from '../core/fb.js';
+import { dayKey } from '../core/policy.js';
 import { activePeople, person, nameOf, onDirectory, departments } from '../services/directory.js';
 import { play } from '../core/sounds.js';
 import {
@@ -18,13 +19,17 @@ import { setTabLabel } from '../tabs.js';
 const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 const fmtLen = (s) => `${Math.floor((s || 0) / 60)}:${String(Math.floor((s || 0) % 60)).padStart(2, '0')}`;
 const fileIcon = (mime = '', name = '') => /pdf/.test(mime) ? 'fa-file-pdf' : /sheet|excel|csv/.test(mime + name) ? 'fa-file-excel' : /word|document/.test(mime) ? 'fa-file-word' : /zip|rar|7z/.test(mime + name) ? 'fa-file-zipper' : /image/.test(mime) ? 'fa-file-image' : /video/.test(mime) ? 'fa-file-video' : /audio/.test(mime) ? 'fa-file-audio' : 'fa-file-lines';
+/** Working / On break / In meeting / Offline — only a status from today's work day counts */
+const liveStatus = (p) => (p && STATUS_META[p.status] && p.status !== 'Offline' && p.dayKey === dayKey(now()) ? p.status : 'Offline');
 const presence = (p) => {
   if (!p) return '';
-  const on = p.dayKey && p.status && p.status !== 'Offline';
-  if (on) { const m = STATUS_META[p.status]; return `<span class="chat-presence on" style="--c:${m.color}">${esc(L(m.ar, m.en))}</span>`; }
+  const s = liveStatus(p);
+  if (s !== 'Offline') { const m = STATUS_META[s]; return `<span class="chat-presence on" style="--c:${m.color}">${esc(L(m.ar, m.en))}</span>`; }
   return `<span class="chat-presence">${p.lastChange ? L(`آخر نشاط ${relTime(toMs(p.lastChange))}`, `Last active ${relTime(toMs(p.lastChange))}`) : L('غير متصل', 'Offline')}</span>`;
 };
-const dotFor = (p) => { const on = p && p.dayKey && p.status && p.status !== 'Offline'; return `<span class="status-dot" style="background:${on ? STATUS_META[p.status].color : 'var(--neutral)'}"></span>`; };
+const dotFor = (p) => { const s = liveStatus(p); return `<span class="status-dot ${s.toLowerCase()}" style="background:${STATUS_META[s].color}" title="${esc(L(STATUS_META[s].ar, STATUS_META[s].en))}"></span>`; };
+/** a coloured status chip (icon + word) next to a name */
+const statusPill = (p, iconOnly = false) => { const s = liveStatus(p), m = STATUS_META[s]; return `<span class="chat-st ${s.toLowerCase()}" style="--c:${m.color}" title="${esc(L(m.ar, m.en))}"><i class="fas ${m.icon}"></i>${iconOnly ? '' : esc(L(m.ar, m.en))}</span>`; };
 const who = (email) => person(email) || { email, name: nameOf(email) };
 const groupPic = (c, size = '') => c.photo ? `<span class="avatar ${size}"><img src="${esc(c.photo)}" alt=""></span>` : `<span class="avatar chat-gav ${size}" aria-hidden="true"><i class="fas fa-users"></i></span>`;
 const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -169,7 +174,7 @@ export default async function render(root, { params }) {
         ${admin ? `<div class="row between"><div><b>${L('السماح بتعديل وحذف الرسايل', 'Allow editing and deleting messages')}</b><div class="xs muted">${L('كل عضو يقدر يعدّل أو يحذف رسايله هو في الجروب ده.', 'Each member may edit or delete their own messages in this group.')}</div></div><label class="switch"><input type="checkbox" id="gedit" ${chat.allowEdit ? 'checked' : ''}><span></span></label></div>` : ''}
         <div><div class="label mb-8">${L('الأعضاء', 'Members')} (${(chat.members || []).length})</div>
           <div class="chat-members">${(chat.members || []).map(e => who(e)).sort((a, b) => ((chat.admins || []).includes(b.email) - (chat.admins || []).includes(a.email)) || (a.name || '').localeCompare(b.name || '', 'ar'))
-            .map(p => `<div class="chat-member"><span class="avatar-wrap">${avatar(p, 'sm')}${dotFor(person(p.email))}</span><span class="grow min0"><b class="truncate">${esc(p.name || p.email)}${p.email === session.email ? ` <span class="muted">(${L('أنت', 'you')})</span>` : ''}</b><small class="truncate">${esc(p.title || '')}</small></span>${(chat.admins || []).includes(p.email) ? `<span class="badge brand">${L('مشرف', 'Admin')}</span>` : ''}</div>`).join('')}</div></div>
+            .map(p => `<div class="chat-member"><span class="avatar-wrap">${avatar(p, 'sm')}${dotFor(person(p.email))}</span><span class="grow min0"><b class="truncate">${esc(p.name || p.email)}${p.email === session.email ? ` <span class="muted">(${L('أنت', 'you')})</span>` : ''}</b><small class="truncate">${esc(p.title || '')}</small></span>${statusPill(person(p.email))}${(chat.admins || []).includes(p.email) ? `<span class="badge brand">${L('مشرف', 'Admin')}</span>` : ''}</div>`).join('')}</div></div>
       </div>`,
       foot: `${canManageGroup(chat) ? `<button class="btn" id="gedit-btn"><i class="fas fa-user-gear"></i> ${L('تعديل الأعضاء والاسم', 'Edit members & name')}</button>` : ''}<button class="btn btn-primary" data-close>${L('تمام', 'Done')}</button>`
     });
@@ -224,17 +229,28 @@ export default async function render(root, { params }) {
   function headHTML() {
     const member = openChat.members.includes(session.email);
     if (isGroup(openChat)) {
-      return `<button class="chat-head-btn" id="ginfo">${groupPic(openChat)}<div class="grow min0"><b class="truncate">${esc(openChat.name)}</b><div class="small muted truncate">${L(`${openChat.members.length} عضو`, `${openChat.members.length} members`)}${member ? '' : ` · <i class="fas fa-eye"></i> ${L('بتشوفه كأدمن', 'Viewing as admin')}`}${openChat.allowEdit ? ` · <i class="fas fa-pen"></i> ${L('التعديل والحذف مفعّلين', 'Edit & delete on')}` : ''}</div></div></button>`;
+      return `<button class="chat-head-btn" id="ginfo">${groupPic(openChat)}<div class="grow min0"><b class="truncate">${esc(openChat.name)}</b><div class="small muted truncate">${L(`${openChat.members.length} عضو`, `${openChat.members.length} members`)}${['Online', 'Break', 'Meeting'].map(s => { const n = openChat.members.filter(e => liveStatus(person(e)) === s).length; return n ? ` · <span class="chat-st-n" style="--c:${STATUS_META[s].color}"><i class="fas ${STATUS_META[s].icon}"></i> ${n}</span>` : ''; }).join('')}${member ? '' : ` · <i class="fas fa-eye"></i> ${L('بتشوفه كأدمن', 'Viewing as admin')}`}${openChat.allowEdit ? ` · <i class="fas fa-pen"></i> ${L('التعديل والحذف مفعّلين', 'Edit & delete on')}` : ''}</div></div></button>`;
     }
     const o = member ? person(otherOf(openChat)) : null;
     return member
-      ? `<span class="avatar-wrap">${avatar(o || who(otherOf(openChat)))}${dotFor(o)}</span><div class="grow min0"><b class="truncate">${esc(convTitle(openChat))}</b><div class="small">${o ? presence(o) : ''}${o && o.title ? ` · <span class="muted">${esc(o.title)}</span>` : ''}</div></div>`
+      ? `<span class="avatar-wrap">${avatar(o || who(otherOf(openChat)))}${dotFor(o)}</span><div class="grow min0"><b class="truncate">${esc(convTitle(openChat))}</b><div class="small">${o ? (liveStatus(o) === 'Offline' ? presence(o) : statusPill(o)) : ''}${o && o.title ? ` · <span class="muted">${esc(o.title)}</span>` : ''}</div></div>`
       : `<span class="chat-duo">${openChat.members.map(m => avatar(who(m), 'sm')).join('')}</span><div class="grow min0"><b class="truncate">${esc(convTitle(openChat))}</b><div class="small muted"><i class="fas fa-eye"></i> ${L('بتشوفها كأدمن — مش بتظهر للطرفين', 'Viewing as admin — they are not notified')}</div></div>`;
   }
   function drawHead() {
     const h = $('#chat-head-main'); if (!h || !openChat) return;
     h.innerHTML = headHTML();
     const gi = $('#ginfo'); if (gi) gi.onclick = () => groupInfo(openChat);
+    // 1:1 — a note above the box when the other person is on a break, in a meeting or not working
+    const away = $('#away');
+    if (away) {
+      const o = !isGroup(openChat) && openChat.members.includes(session.email) ? (person(otherOf(openChat)) || null) : null;
+      const s = o ? liveStatus(o) : 'Online';
+      const first = o ? String(o.name || o.email).split(' ')[0] : '';
+      const txt = { Break: L(`${first} في استراحة دلوقتي — الرد ممكن يتأخر شوية`, `${first} is on a break — the reply may take a while`), Meeting: L(`${first} في اجتماع دلوقتي — هيرد بعد ما يخلص`, `${first} is in a meeting — they will reply afterwards`), Offline: L(`${first} مش شغال دلوقتي — هيشوف رسالتك لما يرجع`, `${first} is not working now — they will see it when back`) }[s];
+      away.className = `chat-away ${s.toLowerCase()} ${txt ? '' : 'hidden'}`;
+      away.style.setProperty('--c', STATUS_META[s].color);
+      away.innerHTML = txt ? `<i class="fas ${STATUS_META[s].icon}"></i><span>${esc(txt)}</span>` : '';
+    }
   }
   async function openThread(id) {
     if (unMsgs) { unMsgs(); unMsgs = null; }
@@ -256,6 +272,7 @@ export default async function render(root, { params }) {
       </header>
       <div class="chat-msgs" id="msgs">${loader()}</div>
       ${member ? `<form class="chat-compose" id="compose">
+        <div class="chat-away hidden" id="away"></div>
         <div class="chat-upload hidden" id="up"><div class="progress"><span style="width:0%"></span></div><small id="up-t"></small></div>
         <div class="row gap-8" style="align-items:flex-end" id="compose-row">
           <label class="btn btn-ghost btn-icon" title="${L('إرفاق صورة أو ملف', 'Attach an image or file')}"><i class="fas fa-paperclip"></i><input type="file" id="file" multiple hidden></label>
@@ -308,7 +325,11 @@ export default async function render(root, { params }) {
       if (m.text) body += `<div class="chat-text">${richText(m)}</div>`;
     }
     const showWho = (g || !member) && side === 'them' && !grouped;
-    const label = showWho ? `<small class="chat-who">${esc(nameOf(m.by))}</small>` : '';
+    const label = showWho ? `<small class="chat-who">${esc(nameOf(m.by))}${statusPill(person(m.by))}</small>` : '';
+    // the sender's photo (with their live status) at the first message of a run; later ones keep the same indent
+    const pp = who(m.by);
+    const av = grouped ? '<span class="chat-av"></span>'
+      : `<button type="button" class="chat-av" ${mine ? '' : `data-dm="${esc(m.by)}"`} title="${esc(pp.name || m.by)}${mine ? '' : ` — ${esc(L('محادثة خاصة', 'Private chat'))}`}"><span class="avatar-wrap">${avatar(pp, 'sm')}${dotFor(person(m.by))}</span></button>`;
     // read receipt: ✓✓ in a 1:1, "seen by n of N" (tap for the list) in a group
     let tick = '';
     if (mine && member && !m.archivedAt) {
@@ -317,7 +338,7 @@ export default async function render(root, { params }) {
     }
     const tools = canEditMessage(openChat, m) && at ? `<span class="chat-tools">${m.by === session.email && m.text && m.type === 'text' ? `<button data-edit="${esc(m.id)}" title="${L('تعديل', 'Edit')}"><i class="fas fa-pen"></i></button>` : ''}<button data-del="${esc(m.id)}" title="${L('حذف', 'Delete')}"><i class="fas fa-trash"></i></button></span>` : '';
     const tagged = !mine && !m.deleted && (m.mentions || []).includes(session.email);
-    return `<div class="chat-row ${side} ${grouped ? 'grouped' : ''}" data-mid="${esc(m.id)}">${label}<div class="chat-bubble ${m.archivedAt ? 'archived' : ''} ${tagged ? 'mentioned' : ''}">${body}<span class="chat-meta num">${tools}${m.edited && !m.deleted ? `<span>${L('اتعدلت', 'edited')}</span>` : ''}${at ? esc(fmtTime(at)) : ''} ${tick}</span></div></div>`;
+    return `<div class="chat-row ${side} ${grouped ? 'grouped' : ''}" data-mid="${esc(m.id)}">${av}<div class="chat-col">${label}<div class="chat-bubble ${m.archivedAt ? 'archived' : ''} ${tagged ? 'mentioned' : ''}">${body}<span class="chat-meta num">${tools}${m.edited && !m.deleted ? `<span>${L('اتعدلت', 'edited')}</span>` : ''}${at ? esc(fmtTime(at)) : ''} ${tick}</span></div></div></div>`;
   }
   function drawMsgs() {
     const el = $('#msgs'); if (!el || !openChat) return;
@@ -355,6 +376,8 @@ export default async function render(root, { params }) {
 
   $('#thread').addEventListener('click', async (e) => {
     const find = (id) => [...msgs, ...archived].find(x => x.id === id);
+    const dm = e.target.closest('[data-dm]');
+    if (dm) { try { const cid = await ensureChat(dm.dataset.dm); location.hash = `#/chat/${encodeURIComponent(cid)}`; } catch (ex) { toastErr(ex); } return; }
     const tr = e.target.closest('[data-task]');
     if (tr) {
       const t = taskById(tr.dataset.task);
@@ -511,7 +534,7 @@ export default async function render(root, { params }) {
     };
     const draw = () => {
       box.innerHTML = suggest.items.map((it, i) => it.kind === '@'
-        ? `<button type="button" data-i="${i}" class="${i === suggest.idx ? 'on' : ''}">${avatar(it.p, 'sm')}<span class="min0"><b class="truncate">${esc(it.name)}</b><small class="truncate">${esc(it.p.title || '')}</small></span></button>`
+        ? `<button type="button" data-i="${i}" class="${i === suggest.idx ? 'on' : ''}"><span class="avatar-wrap">${avatar(it.p, 'sm')}${dotFor(person(it.email))}</span><span class="min0 grow"><b class="truncate">${esc(it.name)}</b><small class="truncate">${esc(it.p.title || '')}</small></span>${statusPill(person(it.email), true)}</button>`
         : `<button type="button" data-i="${i}" class="${i === suggest.idx ? 'on' : ''}"><span class="sg-num">#${it.num}</span><span class="min0"><b class="truncate">${esc(it.task.title)}</b><small>${esc(it.status)}</small></span></button>`).join('');
       box.classList.toggle('hidden', !suggest.items.length); suggest.open = !!suggest.items.length;
     };
@@ -560,7 +583,7 @@ export default async function render(root, { params }) {
       else if (!c && openChat && mode !== 'all' && openChat.members.includes(session.email)) { openChat = null; location.hash = '#/chat'; } // removed from the group
     }
   });
-  const offDir = onDirectory(() => { drawList(); });
+  const offDir = onDirectory(() => { drawList(); drawHead(); drawMsgs(); });
   const onVis = () => { if (!document.hidden && openChat) markRead(openChat); };
   document.addEventListener('visibilitychange', onVis);
   if (openId) {
