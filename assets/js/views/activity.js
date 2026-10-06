@@ -39,6 +39,7 @@ const ACTIONS = {
   'chat.group_create': ['عمل جروب شات', 'Created a chat group', 'fa-users', 'brand'],
   'chat.group_update': ['عدّل جروب شات', 'Edited a chat group', 'fa-users-gear', 'info'],
   'task.link': ['ربط تاسكات بيوزر', 'Linked tasks to an account', 'fa-link', 'info'],
+  'notion.wipe': ['مسح بيانات Notion', 'Deleted the Notion data', 'fa-trash-can', 'warn'],
   'notion.import': ['استيراد من Notion', 'Imported from Notion', 'fa-file-import', 'brand'],
   'task.create': ['عمل تاسك', 'Created a task', 'fa-clipboard-check', 'brand'],
   'task.delete': ['حذف تاسك', 'Deleted a task', 'fa-clipboard-check', 'warn'],

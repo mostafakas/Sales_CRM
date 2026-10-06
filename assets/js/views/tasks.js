@@ -59,6 +59,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
     actions.innerHTML = `
       <div class="seg" id="views">${[['board', 'fa-table-columns', 'Board'], ['list', 'fa-list', 'List'], ['calendar', 'fa-calendar-days', L('التقويم', 'Calendar')]].map(([v, i, t]) => `<button data-view="${v}" class="${prefs.view === v ? 'on' : ''}"><i class="fas ${i}"></i> ${t}</button>`).join('')}</div>
       ${!isFixed && seesAllTasks() ? `<button class="btn btn-ghost btn-sm" id="notion-imp"><i class="fas fa-file-import"></i> ${L('استيراد من Notion', 'Import from Notion')}</button>` : ''}
+      ${!isFixed && isAdmin() && (allTasks().some(t => t.notionKey || t.source === 'notion') || allProjects().some(p => p.notionKey) || allClients().some(c => c.notionKey)) ? `<button class="btn btn-ghost btn-sm" id="notion-wipe" style="color:var(--bad)"><i class="fas fa-trash-can"></i> ${L('مسح بيانات Notion', 'Delete Notion data')}</button>` : ''}
       ${!isFixed && (isLeaderOfAny() || isAdmin()) ? `<button class="btn btn-ghost btn-sm" id="team-perm" title="${L('مين يقدر يعمل تاسكات لنفسه', 'Who may create their own tasks')}"><i class="fas fa-user-gear"></i> ${L('صلاحيات الفريق', 'Team access')}</button>` : ''}
       ${canCreate() ? `<button class="btn btn-primary" id="new-task"><i class="fas fa-plus"></i> ${L('تاسك جديد', 'New task')}</button>` : ''}`;
   };
@@ -167,6 +168,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
     if (e.target.closest('#new-task')) editor(null, { projectId: fixed.projectId || (prefs.project && prefs.project !== '__none' ? prefs.project : '') });
     if (e.target.closest('#team-perm')) teamAccess();
     if (e.target.closest('#notion-imp')) import('./notion-import.js').then(m => m.openNotionImport());
+    if (e.target.closest('#notion-wipe')) import('./notion-import.js').then(m => m.openWipe());
   };
   // drag a card to another column
   let dragId = '';

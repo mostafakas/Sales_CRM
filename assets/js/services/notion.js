@@ -2,7 +2,7 @@
 // tables by their columns, and writes them as tk_clients / tk_projects / tasks. Running it again skips what was
 // already imported (each record carries a notionKey). People are matched to accounts; a person without an
 // account keeps their name on the task (pendingAssignee) until the admin links it to a new account.
-import { db, doc, col, writeBatch, serverTimestamp, Timestamp } from '../core/fb.js';
+import { db, doc, col, writeBatch, serverTimestamp, Timestamp, list, setDoc } from '../core/fb.js';
 import { session, now, isAdmin, isPM } from '../core/session.js';
 import { userError } from '../core/ui.js';
 import { L, cairoMs } from '../core/utils.js';
@@ -137,6 +137,46 @@ export function plan(data, mapping) {
     projects: projects.map(p => ({ ...p, exists: haveP.has(p.notionKey) || allProjects().some(x => x.name.trim() === p.name) })),
     tasks
   };
+}
+
+// ---------- undo: remove what came from Notion ----------
+const fromNotion = (x) => !!(x.notionKey || x.source === 'notion');
+/** what a wipe would remove (everything: every task, not only the imported ones) */
+export function wipePlan(everything = false) {
+  return { tasks: allTasks().filter(t => everything || fromNotion(t)), projects: allProjects().filter(fromNotion), clients: allClients().filter(fromNotion) };
+}
+/** Admin: delete the imported clients, projects and tasks (with their comments and files); onProgress(text, 0..1) */
+export async function wipe(everything = false, onProgress = () => {}) {
+  if (!isAdmin()) throw userError('المسح للأدمن بس.', 'Only admins can do this.');
+  const pl = wipePlan(everything);
+  const refs = [];
+  // comments and their files first (a task's comments live under it)
+  const withComments = pl.tasks.filter(t => t.commentsCount);
+  for (let i = 0; i < withComments.length; i++) {
+    const t = withComments[i];
+    const cs = await list(col(`tasks/${t.id}/comments`)).catch(() => []);
+    cs.forEach(c => {
+      refs.push(doc(db, `tasks/${t.id}/comments`, c.id));
+      if (c.file && c.file.id) { for (let k = 0; k < 10; k++) refs.push(doc(db, `task_files/${c.file.id}/chunks`, String(k))); refs.push(doc(db, 'task_files', c.file.id)); }
+    });
+    onProgress(L('التعليقات والملفات', 'Comments and files'), 0.2 * (i + 1) / withComments.length);
+  }
+  pl.tasks.forEach(t => refs.push(doc(db, 'tasks', t.id)));
+  pl.projects.forEach(p => refs.push(doc(db, 'tk_projects', p.id)));
+  pl.clients.forEach(c => refs.push(doc(db, 'tk_clients', c.id)));
+  for (let i = 0; i < refs.length; i += 400) {
+    const b = writeBatch(db);
+    refs.slice(i, i + 400).forEach(r => b.delete(r));
+    await b.commit();
+    onProgress(L('بيمسح…', 'Deleting…'), 0.2 + 0.75 * Math.min(1, (i + 400) / refs.length));
+  }
+  // task numbers continue right after the highest one left
+  const gone = new Set(pl.tasks.map(t => t.id));
+  const top = allTasks().filter(t => !gone.has(t.id)).reduce((m, t) => Math.max(m, Number(t.num) || 0), 0);
+  await setDoc(doc(db, 'counters', 'tasks'), { seq: top });
+  onProgress(L('خلص', 'Done'), 1);
+  track('notion.wipe', { detail: `${pl.clients.length} / ${pl.projects.length} / ${pl.tasks.length}${everything ? ' (all tasks)' : ''}` });
+  return { clients: pl.clients.length, projects: pl.projects.length, tasks: pl.tasks.length, next: top + 1 };
 }
 
 /** write the plan; onProgress(text, 0..1) */

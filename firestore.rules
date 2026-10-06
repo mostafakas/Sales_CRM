@@ -518,6 +518,8 @@ service cloud.firestore {
       allow write: if active() && k == 'tasks' && request.resource.data.seq is int
         && request.resource.data.seq > (resource == null ? 0 : resource.data.get('seq', 0))
         && request.resource.data.seq <= (resource == null ? 0 : resource.data.get('seq', 0)) + 500;
+      // admins may set it freely (imports of many tasks, or numbering again after deleting)
+      allow write: if isAdmin() && k == 'tasks' && request.resource.data.seq is int && request.resource.data.seq >= 0;
     }
     // names only (no money) — everyone may read them to filter their tasks; admins / project managers manage them
     match /tk_projects/{id} { allow read: if active(); allow write: if isAdmin() || isPM(); }

@@ -4,7 +4,7 @@ import { L, esc, num, ymd } from '../core/utils.js';
 import { toast, toastErr, modal, busy } from '../core/ui.js';
 import { now } from '../core/session.js';
 import { activePeople, person } from '../services/directory.js';
-import { readFiles, peopleIn, plan, runImport } from '../services/notion.js';
+import { readFiles, peopleIn, plan, runImport, wipePlan, wipe } from '../services/notion.js';
 import { pendingPeople, guessPerson, linkPending } from '../services/tasks.js';
 
 const peopleOptions = (sel) => `<option value="">${L('— ملوش يوزر لسه (يتحفظ باسمه)', '— No account yet (keep the name)')}</option>` +
@@ -96,6 +96,38 @@ export function openPendingPeople() {
       if (!email) { toast(L('اختار الموظف الأول', 'Pick the employee first'), '', 'warn'); return; }
       try { const n = await linkPending(b.dataset.link, email); toast(L(`اتنقل ${n} تاسك لـ ${(person(email) || {}).name || email}`, `${n} tasks moved to ${(person(email) || {}).name || email}`)); draw(); } catch (ex) { toastErr(ex); }
     }));
+  };
+  draw();
+}
+
+/** Admin: delete everything that came from Notion (optionally every task) — counted first, confirmed by typing */
+export function openWipe() {
+  const m = modal({ title: L('مسح بيانات Notion', 'Delete the Notion data'), icon: 'fa-trash-can', size: 'narrow', body: '<div id="nw"></div>', foot: '<div id="nwf" class="row gap-8 grow"></div>' });
+  const WORD = L('مسح', 'DELETE');
+  const draw = () => {
+    const all = !!(m.$('#nw-all') && m.$('#nw-all').checked);
+    const pl = wipePlan(all);
+    m.$('#nw').innerHTML = `<div class="alert bad mb-16"><i class="fas fa-triangle-exclamation"></i><span>${L('المسح نهائي ومفيش رجوع فيه.', 'This is permanent and cannot be undone.')}</span></div>
+      <div class="ni-boxes" style="grid-template-columns:repeat(3,1fr)">
+        <div class="ni-box bad"><i class="fas fa-handshake"></i><div><b class="num">${num(pl.clients.length)}</b><span>${L('عميل', 'clients')}</span></div></div>
+        <div class="ni-box bad"><i class="fas fa-diagram-project"></i><div><b class="num">${num(pl.projects.length)}</b><span>${L('مشروع', 'projects')}</span></div></div>
+        <div class="ni-box bad"><i class="fas fa-list-check"></i><div><b class="num">${num(pl.tasks.length)}</b><span>${L('تاسك', 'tasks')}</span></div></div></div>
+      <label class="row gap-8 mt-16" style="cursor:pointer"><input type="checkbox" id="nw-all" ${all ? 'checked' : ''}><span>${L('امسح كل التاسكات كمان، حتى اللي اتعملت في السيستم نفسه', 'Also delete every task, including those created in the system')}</span></label>
+      <p class="xs muted mt-8">${L('التعليقات والملفات اللي على التاسكات دي بتتمسح معاها. مهام الـ To-Do بتفضل، من غير ربط بالتاسك. ترقيم التاسكات الجاية بيكمل بعد آخر رقم فاضل.', 'Comments and files on these tasks go too. To-Do items stay, without the task link. New task numbers continue after the highest one left.')}</p>
+      <div class="field mt-16"><label>${L(`اكتب «${WORD}» للتأكيد`, `Type "${WORD}" to confirm`)}</label><input class="input" id="nw-word" autocomplete="off"></div>
+      <div class="ni-prog hidden" id="nw-prog"><div class="tk-bar big"><span style="width:0%"></span></div><small class="muted" id="nw-pt"></small></div>`;
+    m.$('#nwf').innerHTML = `<button class="btn" id="nw-x">${L('إلغاء', 'Cancel')}</button><span class="grow"></span><button class="btn btn-danger" id="nw-go" disabled><i class="fas fa-trash-can"></i> ${L('مسح نهائي', 'Delete permanently')}</button>`;
+    m.$('#nw-x').onclick = () => m.close();
+    m.$('#nw-all').onchange = draw;
+    m.$('#nw-word').oninput = (e) => { m.$('#nw-go').disabled = e.target.value.trim() !== WORD || !(pl.clients.length + pl.projects.length + pl.tasks.length); };
+    m.$('#nw-go').onclick = (e) => busy(e.currentTarget, async () => {
+      const pr = m.$('#nw-prog'); pr.classList.remove('hidden'); m.$('#nw-all').disabled = true;
+      try {
+        const r = await wipe(all, (t, f) => { pr.querySelector('span').style.width = Math.round(f * 100) + '%'; m.$('#nw-pt').textContent = t; });
+        m.close();
+        toast(L(`اتمسح ${r.clients} عميل و${r.projects} مشروع و${r.tasks} تاسك`, `Deleted ${r.clients} clients, ${r.projects} projects and ${r.tasks} tasks`), L(`التاسك الجاي هيبقى #${r.next}`, `The next task will be #${r.next}`));
+      } catch (ex) { toastErr(ex); }
+    });
   };
   draw();
 }
