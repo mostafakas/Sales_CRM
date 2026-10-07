@@ -77,7 +77,7 @@ export default async function render(root) {
     const topLate = per.filter(x => x.t.lateMinutes > 0).sort((a, b) => b.t.lateMinutes - a.t.lateMinutes).slice(0, 5);
     const topGood = per.filter(x => x.t.present > 0).sort((a, b) => b.t.commitment - a.t.commitment || a.t.lateMinutes - b.t.lateMinutes || b.hrs - a.hrs).slice(0, 5);
     const sorters = { todo: (a, b) => (a.td ?? 101) - (b.td ?? 101), late: (a, b) => b.t.lateMinutes - a.t.lateMinutes, absent: (a, b) => b.t.absent - a.t.absent, hours: (a, b) => b.hrs - a.hrs, commit: (a, b) => a.t.commitment - b.t.commitment, tasks: (a, b) => b.tk.lateOpen - a.tk.lateOpen || a.tk.rate - b.tk.rate, name: (a, b) => (a.p.name || '').localeCompare(b.p.name || '', 'ar') };
-    const link = (p) => isHR() ? `#/employees/${encodeURIComponent(p.email)}` : `#/reports`;
+    const link = (p) => isAdmin() ? `#/stats/${encodeURIComponent(p.email)}` : (isHR() ? `#/employees/${encodeURIComponent(p.email)}` : `#/reports`);
     const th = (k, t) => `<th class="${k === 'name' ? '' : 'num'}"><button class="db-sort ${sortBy === k ? 'on' : ''}" data-sort="${k}">${t}${sortBy === k ? ' <i class="fas fa-arrow-down-short-wide"></i>' : ''}</button></th>`;
 
     $('#dash').innerHTML = `
