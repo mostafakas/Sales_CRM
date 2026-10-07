@@ -4,20 +4,20 @@ import { L, esc, num, fmtHours, fmtMin, ymd } from '../core/utils.js';
 import { avatar, loader, empty } from '../core/ui.js';
 import { session, now, isHR, isAdmin } from '../core/session.js';
 import { toMs } from '../core/fb.js';
-import { teamMonth } from '../services/reports.js';
+import { teamMonth, summarize } from '../services/reports.js';
 import { nameOf, person } from '../services/directory.js';
-import { startTasks, onTasks, allTasks, doneDay } from '../services/tasks.js';
+import { startTasks, onTasks, allTasks, doneDay, periodRange, inPeriod } from '../services/tasks.js';
+import { periodPicker } from './task-ui.js';
 import { watchMonth } from '../services/todos.js';
 
 const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 const avgHours = (t) => (t.present ? (t.workMs + t.meetingMs) / t.present : 0);
 
-/** task delivery for a set of tasks during a month */
-function taskStats(ts, ym) {
-  const inMonth = (d) => !!d && d.slice(0, 7) === ym;
+/** task delivery for a set of tasks in a period (by due date; tasks without one count in every period) */
+function taskStats(ts, range) {
   const today = ymd(now());
-  const rel = ts.filter(t => inMonth(t.due) || (t.status === 'done' && inMonth(doneDay(t))) || inMonth(ymd(toMs(t.createdAt) || now())) || (t.status !== 'done' && t.due && t.due < today));
-  const done = rel.filter(t => t.status === 'done' && inMonth(doneDay(t)));
+  const rel = ts.filter(t => inPeriod(t, range));
+  const done = rel.filter(t => t.status === 'done');
   const onTime = done.filter(t => !t.due || doneDay(t) <= t.due).length;
   const lateOpen = rel.filter(t => t.status !== 'done' && t.due && t.due < today).length;
   const open = rel.filter(t => t.status !== 'done').length;
@@ -26,11 +26,11 @@ function taskStats(ts, ym) {
 
 export default async function render(root) {
   startTasks();
-  let ym = ymd(now()).slice(0, 7), dept = '', data = null, sortBy = 'late', todos = [], unTodo = null;
+  let ym = ymd(now()).slice(0, 7), week = 0, dept = '', data = null, sortBy = 'late', todos = [], unTodo = null;
   const watchTodo = () => { if (unTodo) unTodo(); unTodo = watchMonth(ym, rows => { todos = rows; draw(); }); };
   const scopeAll = isAdmin() || isHR();
   root.innerHTML = `<div class="page-head"><div><h2>${L('الداشبورد', 'Dashboard')}</h2><p>${scopeAll ? L('الشركة كلها', 'The whole company') : L('فريقك', 'Your team')}</p></div>
-      <div class="row gap-8 wrap"><select class="select" id="dept" style="min-width:160px"></select><input class="input" type="month" id="ym" value="${ym}" max="${ym}" style="width:170px"></div></div>
+      <div class="row gap-8 wrap"><select class="select" id="dept" style="min-width:160px"></select><span id="period"></span></div></div>
     <div id="dash">${loader()}</div>`;
   const $ = (s) => root.querySelector(s);
 
@@ -43,20 +43,22 @@ export default async function render(root) {
   }
 
   function draw() {
+    $('#period').innerHTML = periodPicker(ym, week, { ahead: 0 });
     if (!data) return;
+    const range = periodRange(ym, week);
     const rows = data.people.filter(x => !dept || (x.person.department || L('بدون قسم', 'No department')) === dept);
     if (!rows.length) { $('#dash').innerHTML = `<div class="card">${empty('fa-users', L('مفيش موظفين', 'No employees'))}</div>`; return; }
     const tasks = allTasks();
     const per = rows.map(x => {
-      const t = x.totals;
-      const td = todos.filter(k => k.owner === x.person.email);
-      return { p: x.person, t, hrs: avgHours(t), tk: taskStats(tasks.filter(k => k.assignee === x.person.email), ym), td: td.length ? Math.round(td.filter(k => k.done).length / td.length * 100) : null, tdN: td.length };
+      const t = week ? summarize(x.rows.filter(r => r.date >= range.from && r.date <= range.to)) : x.totals;   // attendance of that week only
+      const td = todos.filter(k => k.owner === x.person.email && k.date >= range.from && k.date <= range.to);
+      return { p: x.person, t, hrs: avgHours(t), tk: taskStats(tasks.filter(k => k.assignee === x.person.email), range), td: td.length ? Math.round(td.filter(k => k.done).length / td.length * 100) : null, tdN: td.length };
     });
     const sum = (f) => per.reduce((s, x) => s + f(x), 0);
     const present = sum(x => x.t.present), absent = sum(x => x.t.absent), lateDays = sum(x => x.t.lateDays), lateMin = sum(x => x.t.lateMinutes);
     const commit = Math.round(sum(x => x.t.commitment) / per.length);
     const hrs = present ? sum(x => x.t.workMs + x.t.meetingMs) / present : 0;
-    const allTk = taskStats(tasks.filter(k => per.some(x => x.p.email === k.assignee)), ym);
+    const allTk = taskStats(tasks.filter(k => per.some(x => x.p.email === k.assignee)), range);
     const tile = (icon, cls, label, value, hint = '') => `<div class="card stat"><div class="label"><span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>${esc(label)}</div><div class="value">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
 
     // by department
@@ -70,7 +72,7 @@ export default async function render(root) {
 
     // leaders' task delivery
     const leaders = [...new Set(tasks.map(k => k.leader).filter(Boolean))].filter(e => scopeAll || e === session.email);
-    const leaderRows = leaders.map(e => ({ e, tk: taskStats(tasks.filter(k => k.leader === e), ym) })).filter(r => r.tk.total).sort((a, b) => b.tk.total - a.tk.total);
+    const leaderRows = leaders.map(e => ({ e, tk: taskStats(tasks.filter(k => k.leader === e), range) })).filter(r => r.tk.total).sort((a, b) => b.tk.total - a.tk.total);
 
     const topLate = per.filter(x => x.t.lateMinutes > 0).sort((a, b) => b.t.lateMinutes - a.t.lateMinutes).slice(0, 5);
     const topGood = per.filter(x => x.t.present > 0).sort((a, b) => b.t.commitment - a.t.commitment || a.t.lateMinutes - b.t.lateMinutes || b.hrs - a.hrs).slice(0, 5);
@@ -111,10 +113,13 @@ export default async function render(root) {
   }
 
   root.addEventListener('change', (e) => {
-    if (e.target.id === 'ym' && e.target.value) { ym = e.target.value; watchTodo(); load(); }
+    if (e.target.matches('[data-pp-month]') && e.target.value) { ym = e.target.value; week = 0; watchTodo(); load(); }
     if (e.target.id === 'dept') { dept = e.target.value; draw(); }
   });
-  root.addEventListener('click', (e) => { const s = e.target.closest('[data-sort]'); if (s) { sortBy = s.dataset.sort; draw(); } });
+  root.addEventListener('click', (e) => {
+    const w = e.target.closest('[data-pp-week]'); if (w) { week = Number(w.dataset.ppWeek); draw(); return; }
+    const s = e.target.closest('[data-sort]'); if (s) { sortBy = s.dataset.sort; draw(); }
+  });
   const off = onTasks(() => draw());
   watchTodo();
   await load();

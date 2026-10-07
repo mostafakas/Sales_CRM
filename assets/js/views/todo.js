@@ -5,8 +5,8 @@ import { toast, toastErr, avatar, empty, busy, confirmDialog, modal } from '../c
 import { session } from '../core/session.js';
 import { person, nameOf, onDirectory } from '../services/directory.js';
 import { watchTodos, addTodo, toggleTodo, editTodo, deleteTodo, moveTodos, canView, viewable, today } from '../services/todos.js';
-import { startTasks, onTasks, allTasks, taskById, isLate } from '../services/tasks.js';
-import { details, statusBadge } from './task-ui.js';
+import { startTasks, onTasks, allTasks, taskById, isLate, periodRange, inPeriod } from '../services/tasks.js';
+import { details, statusBadge, periodPicker, monthName } from './task-ui.js';
 import { setTabLabel } from '../tabs.js';
 
 const weekStart = (d) => { const x = new Date(`${d}T00:00:00Z`); return addDays(d, -((x.getUTCDay() + 1) % 7)); }; // Saturday
@@ -20,11 +20,13 @@ export default async function render(root, { params = [] }) {
   const p = person(email) || { email, name: nameOf(email) };
   setTabLabel(own ? '' : (p.name || email));
   let day = today(), items = [], un = null, monthsKey = '';
+  let pw = null;   // null = this calendar week (Sat–Fri) · 0 = the whole month · 1–4 = a week of the month
 
   root.innerHTML = `<div class="td-page">
     <div class="page-head"><div class="row gap-12">${avatar(p, 'lg')}<div><h2>${own ? 'To-Do List' : `To-Do — ${esc(p.name || email)}`}</h2><p>${own ? L('خطة يومك، مربوطة بتاسكاتك', 'Your day plan, linked to your tasks') : `${esc(p.title || '')}${p.department ? ' · ' + esc(p.department) : ''}`}</p></div></div>
       ${viewable().length > 1 ? `<select class="select" id="who" style="min-width:220px">${viewable().sort((a, b) => (a.email === session.email ? -1 : b.email === session.email ? 1 : (a.name || '').localeCompare(b.name || '', 'ar'))).map(x => `<option value="${esc(x.email)}" ${x.email === email ? 'selected' : ''}>${esc(x.email === session.email ? L('أنا', 'Me') : (x.name || x.email))}</option>`).join('')}</select>` : ''}</div>
     <div class="grid g-4 keep-2 mb-16" id="stats"></div>
+    <div class="row gap-8 wrap mb-8" id="period"></div>
     <div class="td-week card mb-16" id="week"></div>
     <div class="td-grid">
       <section class="card td-day"><div class="card-head"><div class="row gap-8"><button class="btn btn-ghost btn-icon btn-sm" data-step="-1"><i class="fas fa-chevron-right" data-flip></i></button><h3 id="day-t"></h3><button class="btn btn-ghost btn-icon btn-sm" data-step="1"><i class="fas fa-chevron-left" data-flip></i></button></div>
@@ -48,17 +50,22 @@ export default async function render(root, { params = [] }) {
 
   function draw() {
     const dayItems = items.filter(x => x.date === day);
-    const ws = weekStart(day), week = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
-    const weekItems = items.filter(x => x.date >= ws && x.date <= week[6]);
-    const open = myTasks().filter(t => t.status !== 'done');
+    const range = pw === null ? null : periodRange(day.slice(0, 7), pw);
+    const ws = weekStart(day);
+    const week = range ? Array.from({ length: Number(range.to.slice(8)) - Number(range.from.slice(8)) + 1 }, (_, i) => addDays(range.from, i)) : Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+    const weekItems = items.filter(x => x.date >= week[0] && x.date <= week[week.length - 1]);
+    const open = myTasks().filter(t => t.status !== 'done' && inPeriod(t, range));
+    const periodName = pw === null ? L('الأسبوع', 'This week') : pw ? L(`أسبوع ${pw}`, `Week ${pw}`) : monthName(day.slice(0, 7));
+    $('#period').innerHTML = `<button type="button" class="btn btn-sm ${pw === null ? 'btn-soft' : 'btn-ghost'}" data-pw-cal><i class="fas fa-calendar-week"></i> ${L('الأسبوع ده', 'This week')}</button>${periodPicker(day.slice(0, 7), pw === null ? -1 : pw)}`;
     const late = open.filter(isLate);
     const tile = (icon, cls, label, value, hint = '') => `<div class="card stat"><div class="label"><span class="icon-tile ${cls}"><i class="fas ${icon}"></i></span>${esc(label)}</div><div class="value">${value}</div>${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
     $('#stats').innerHTML =
       tile('fa-list-check', 'brand', day === today() ? L('إنجاز النهارده', 'Done today') : L('إنجاز اليوم ده', 'Done that day'), `${pctOf(dayItems)}<small>%</small>`, L(`${dayItems.filter(x => x.done).length} من ${dayItems.length}`, `${dayItems.filter(x => x.done).length} of ${dayItems.length}`)) +
-      tile('fa-calendar-week', 'ok', L('إنجاز الأسبوع', 'This week'), `${pctOf(weekItems)}<small>%</small>`, L(`${weekItems.filter(x => x.done).length} من ${weekItems.length}`, `${weekItems.filter(x => x.done).length} of ${weekItems.length}`)) +
+      tile('fa-calendar-week', 'ok', L(`إنجاز ${periodName}`, `${periodName} done`), `${pctOf(weekItems)}<small>%</small>`, L(`${weekItems.filter(x => x.done).length} من ${weekItems.length}`, `${weekItems.filter(x => x.done).length} of ${weekItems.length}`)) +
       tile('fa-clipboard-check', 'info', L('تاسكات مفتوحة', 'Open tasks'), num(open.length), L(`${open.filter(t => t.status === 'review').length} في المراجعة`, `${open.filter(t => t.status === 'review').length} in review`)) +
       tile('fa-triangle-exclamation', 'bad', L('تاسكات متأخرة', 'Late tasks'), num(late.length), late.length ? L('محتاجة تتعمل الأول', 'Do these first') : L('مفيش 👌', 'None 👌'));
-    $('#week').innerHTML = week.map((d, i) => { const xs = items.filter(x => x.date === d); const pc = pctOf(xs); return `<button class="td-wd ${d === day ? 'on' : ''} ${d === today() ? 'today' : ''}" data-day="${d}"><small>${DAYS()[i]}</small><b class="num">${Number(d.slice(8))}</b><span class="td-ring" style="--p:${pc}"><i class="num">${xs.length ? `${xs.filter(x => x.done).length}/${xs.length}` : '—'}</i></span></button>`; }).join('');
+    $('#week').classList.toggle('long', week.length > 7);
+    $('#week').innerHTML = week.map((d) => { const xs = items.filter(x => x.date === d); const pc = pctOf(xs); return `<button class="td-wd ${d === day ? 'on' : ''} ${d === today() ? 'today' : ''}" data-day="${d}"><small>${DAYS()[(new Date(`${d}T00:00:00Z`).getUTCDay() + 1) % 7]}</small><b class="num">${Number(d.slice(8))}</b><span class="td-ring" style="--p:${pc}"><i class="num">${xs.length ? `${xs.filter(x => x.done).length}/${xs.length}` : '—'}</i></span></button>`; }).join('');
     $('#day-t').textContent = day === today() ? L('النهارده', 'Today') : (day === addDays(today(), -1) ? L('امبارح', 'Yesterday') : (day === addDays(today(), 1) ? L('بكرة', 'Tomorrow') : fmtDate(day)));
     $('#day').value = day;
     // unfinished items from earlier days
@@ -88,9 +95,17 @@ export default async function render(root, { params = [] }) {
   }
 
   const setDay = (d) => { if (!d) return; day = d; subscribe(); draw(); };
+  /** pick a week of the month (or the whole month): the day jumps into it unless it is already there */
+  const setPeriod = (w) => {
+    pw = w;
+    if (w) { const r = periodRange(day.slice(0, 7), w); if (day < r.from || day > r.to) { const t = today(); day = t >= r.from && t <= r.to ? t : r.from; } }
+    subscribe(); draw();
+  };
   root.addEventListener('click', async (e) => {
     const st = e.target.closest('[data-step]'); if (st) { setDay(addDays(day, Number(st.dataset.step))); return; }
     const wd = e.target.closest('[data-day]'); if (wd) { setDay(wd.dataset.day); return; }
+    if (e.target.closest('[data-pw-cal]')) { pw = null; setDay(today()); return; }
+    const pwb = e.target.closest('[data-pp-week]'); if (pwb) { setPeriod(Number(pwb.dataset.ppWeek)); return; }
     if (e.target.closest('#to-today')) { setDay(today()); return; }
     const tk = e.target.closest('[data-task]'); if (tk) { details(tk.dataset.task); return; }
     const pl = e.target.closest('[data-plan]'); if (pl) { const t = taskById(pl.dataset.plan); if (t) busy(pl, async () => { try { await addTodo(day, t.title, t); } catch (ex) { toastErr(ex); } }); return; }
@@ -106,6 +121,7 @@ export default async function render(root, { params = [] }) {
   });
   root.addEventListener('change', async (e) => {
     if (e.target.id === 'day') setDay(e.target.value);
+    if (e.target.matches('[data-pp-month]')) { const m = e.target.value; day = today().slice(0, 7) === m ? today() : `${m}-01`; if (pw === null) pw = 0; setPeriod(pw); }
     if (e.target.id === 'who') location.hash = e.target.value === session.email ? '#/todo' : `#/todo/${encodeURIComponent(e.target.value)}`;
     const tg = e.target.closest('[data-tg]'); if (tg) { const x = items.find(i => i.id === tg.dataset.tg); if (x) try { await toggleTodo(x); } catch (ex) { toastErr(ex); tg.checked = !tg.checked; } }
   });

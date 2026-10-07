@@ -1146,3 +1146,13 @@ html[dir="rtl"] .mon-metric.on { box-shadow: inset -3px 0 0 var(--brand); }
 .chat-suggest button .chat-st { margin-inline-start: auto; }
 @media (prefers-reduced-motion: reduce) { .chat-st, .status-dot { animation: none !important; } }
 @media (max-width: 900px) { .chat-av, .chat-av .avatar { width: 28px; } .chat-av .avatar { height: 28px; font-size: 10px; } .chat-col { max-width: calc(100% - 40px); } }
+
+/* ---------- the four weeks of a month ---------- */
+.tk-period { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk-period .select { width: auto; min-width: 150px; height: 38px; font-size: 13px; }
+.tk-weeks button { flex-direction: column; gap: 0; line-height: 1.2; padding: 5px 11px; }
+.tk-weeks button small { font-size: 10px; font-weight: 600; opacity: .75; }
+.tk-weeks.off { opacity: .45; }
+.tk-weeks button:disabled { cursor: not-allowed; }
+
+.td-week.long { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }

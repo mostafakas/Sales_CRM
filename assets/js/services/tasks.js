@@ -32,6 +32,26 @@ export const taskLink = (id) => `#/tasks/t/${encodeURIComponent(id)}`;
 export const isLate = (t) => !!t.due && t.status !== 'done' && t.due < ymd(now());
 export const doneDay = (t) => dayKey(toMs(t.doneAt) || now());
 
+// ---------- the four weeks of a month: 1–7, 8–14, 15–21, 22–end ----------
+export const WEEK_DAYS = [[1, 7], [8, 14], [15, 21], [22, 31]];
+const p2 = (n) => String(n).padStart(2, '0');
+export const lastDayOf = (month) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate();
+/** { from, to } of a month (week 0) or of one of its four weeks; null = no period */
+export function periodRange(month, week = 0) {
+  if (!month) return null;
+  const [a, b] = week ? WEEK_DAYS[week - 1] : [1, 31];
+  return { from: `${month}-${p2(a)}`, to: `${month}-${p2(Math.min(b, lastDayOf(month)))}` };
+}
+/** by due date; a task without one shows in every period (a finished one only in the period it was finished) */
+export function inPeriod(t, range) {
+  if (!range) return true;
+  if (t.due) return t.due >= range.from && t.due <= range.to;
+  if (t.status === 'done') { const d = doneDay(t); return d >= range.from && d <= range.to; }
+  return true;
+}
+/** the week (1–4) a date falls in */
+export const weekOfDate = (d) => { const n = Number(String(d).slice(8, 10)); return n <= 7 ? 1 : n <= 14 ? 2 : n <= 21 ? 3 : 4; };
+
 // ---------- who may do what ----------
 export const seesAllTasks = () => isAdmin() || isPM();
 /** admin, project manager, or the task's leader */

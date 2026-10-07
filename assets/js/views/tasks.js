@@ -6,10 +6,10 @@ import { session, now, isAdmin, isHR } from '../core/session.js';
 import { activePeople, person, nameOf, onDirectory, supervisedPeople } from '../services/directory.js';
 import {
   STATUS, ORDER, PRIORITY, PROJECT_STATUS, startTasks, onTasks, allTasks, allProjects, allClients, projectById, clientById, isLate, doneDay, canMove,
-  canCreate, canManageProjects, seesAllTasks, saveProject, deleteProject, saveClient, deleteClient, importFromCrm, migrateChatTasks, setSelfTasks, taskById, pendingPeople
+  periodRange, inPeriod, canCreate, canManageProjects, seesAllTasks, saveProject, deleteProject, saveClient, deleteClient, importFromCrm, migrateChatTasks, setSelfTasks, taskById, pendingPeople
 } from '../services/tasks.js';
 import { watchMonth } from '../services/todos.js';
-import { card, move, editor, details, who, statusBadge } from './task-ui.js';
+import { card, move, editor, details, who, statusBadge, periodPicker, monthName } from './task-ui.js';
 import { setTabLabel } from '../tabs.js';
 import { dayKey } from '../core/policy.js';
 
@@ -50,7 +50,7 @@ export default async function render(root, { params = [] }) {
 // Tasks tab: Board / List / Calendar
 // =====================================================================================================
 function tasksTab(body, actions, openId, fixed = {}) {
-  const prefs = { view: 'board', scope: 'all', who: '', project: '', client: '', priority: '', due: '', ...loadPrefs(), ...fixed.prefs };
+  const prefs = { view: 'board', scope: 'all', who: '', project: '', client: '', priority: '', due: '', month: '', week: 0, ...loadPrefs(), ...fixed.prefs };
   let q = '', finishedDay = '', calMonth = ymd(now()).slice(0, 7);
   const isFixed = !!fixed.projectId;
   if (!isFixed) setTabLabel('');
@@ -72,13 +72,16 @@ function tasksTab(body, actions, openId, fixed = {}) {
       ${mgr && !isFixed ? `<select class="select" id="tf-client"><option value="">${L('كل العملاء', 'All clients')}</option>${allClients().map(c => `<option value="${esc(c.id)}" ${prefs.client === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : ''}
       <select class="select" id="tf-priority"><option value="">${L('كل الأولويات', 'Any priority')}</option>${Object.entries(PRIORITY).map(([k, v]) => `<option value="${k}" ${prefs.priority === k ? 'selected' : ''}>${esc(L(v.ar, v.en))}</option>`).join('')}</select>
       <select class="select" id="tf-due"><option value="">${L('أي ميعاد', 'Any due date')}</option>${[['late', L('المتأخر', 'Late')], ['today', L('النهارده', 'Today')], ['week', L('الأسبوع ده', 'This week')], ['none', L('من غير ميعاد', 'No due date')]].map(([k, t]) => `<option value="${k}" ${prefs.due === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
-      ${(prefs.who || prefs.project || prefs.client || prefs.priority || prefs.due || q) ? `<button class="btn btn-ghost btn-sm" id="tf-clear"><i class="fas fa-filter-circle-xmark"></i> ${L('مسح الفلاتر', 'Clear')}</button>` : ''}
+      ${periodPicker(prefs.month, prefs.week, { allMonths: true })}
+      ${(prefs.who || prefs.project || prefs.client || prefs.priority || prefs.due || prefs.month || q) ? `<button class="btn btn-ghost btn-sm" id="tf-clear"><i class="fas fa-filter-circle-xmark"></i> ${L('مسح الفلاتر', 'Clear')}</button>` : ''}
     </div>`;
   };
   const filtered = () => {
     const today = ymd(now()), wk = addDays(today, 7);
     const qq = q.trim().toLowerCase().replace(/^#/, '');
+    const range = periodRange(prefs.month, prefs.week);
     return allTasks().filter(t => {
+      if (!inPeriod(t, range)) return false;
       if (fixed.projectId && t.projectId !== fixed.projectId) return false;
       if (prefs.who === '__me' && t.assignee !== session.email) return false;
       if (prefs.who === '__pending' && t.assignee) return false;
@@ -145,7 +148,7 @@ function tasksTab(body, actions, openId, fixed = {}) {
       <div id="tk-view">${prefs.view === 'list' ? listView(rows) : prefs.view === 'calendar' ? calendar(rows) : board(rows)}</div>`;
     if (!allTasks().length && !canCreate()) body.querySelector('#tk-view').innerHTML = `<div class="card">${empty('fa-list-check', L('مفيش تاسكات ليك لسه', 'No tasks for you yet'), L('أول ما الليدر يدّيك تاسك هيظهر هنا.', 'Tasks your leader gives you will show up here.'))}</div>`;
   };
-  const setPref = (k, v) => { prefs[k] = v; if (!isFixed) savePrefs({ view: prefs.view, who: prefs.who, project: prefs.project, client: prefs.client, priority: prefs.priority, due: prefs.due }); draw(); };
+  const setPref = (k, v) => { prefs[k] = v; if (k === 'month') { prefs.week = 0; if (v) calMonth = v; } if (!isFixed) savePrefs({ view: prefs.view, who: prefs.who, project: prefs.project, client: prefs.client, priority: prefs.priority, due: prefs.due, month: prefs.month, week: prefs.week }); draw(); };
   body.addEventListener('change', (e) => {
     const id = e.target.id;
     if (id === 'tf-who') setPref('who', e.target.value);
@@ -153,12 +156,14 @@ function tasksTab(body, actions, openId, fixed = {}) {
     if (id === 'tf-client') setPref('client', e.target.value);
     if (id === 'tf-priority') setPref('priority', e.target.value);
     if (id === 'tf-due') setPref('due', e.target.value);
+    if (e.target.matches('[data-pp-month]')) setPref('month', e.target.value);
     if (id === 'tk-fday') { finishedDay = e.target.value >= dayKey(now()) ? '' : e.target.value; draw(); }
   });
   body.addEventListener('input', debounce((e) => { if (e.target.id === 'tf-q') { q = e.target.value; const pos = e.target.selectionStart; draw(); const el = body.querySelector('#tf-q'); el.focus(); el.setSelectionRange(pos, pos); } }, 250));
   body.addEventListener('click', (e) => {
     if (e.target.closest('#pend-link')) { import('./notion-import.js').then(m => m.openPendingPeople()); return; }
-    if (e.target.closest('#tf-clear')) { q = ''; Object.assign(prefs, { who: '', project: '', client: '', priority: '', due: '' }); setPref('who', ''); return; }
+    const wk = e.target.closest('[data-pp-week]'); if (wk) { setPref('week', Number(wk.dataset.ppWeek)); return; }
+    if (e.target.closest('#tf-clear')) { q = ''; Object.assign(prefs, { who: '', project: '', client: '', priority: '', due: '', month: '', week: 0 }); setPref('who', ''); return; }
     const fd = e.target.closest('[data-fday]'); if (fd) { const d = addDays(finishedDay || dayKey(now()), Number(fd.dataset.fday)); finishedDay = d >= dayKey(now()) ? '' : d; draw(); return; }
     const cal = e.target.closest('[data-cal]'); if (cal) { const [y, m] = calMonth.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + Number(cal.dataset.cal), 1)); calMonth = d.toISOString().slice(0, 7); draw(); return; }
     const o = e.target.closest('[data-open]'); if (o) details(o.dataset.open);
@@ -364,16 +369,18 @@ export function openTasksOf(email) {
 function teamTab(body, actions) {
   setTabLabel(L('الفريق', 'Team'));
   actions.innerHTML = '';
-  const ym = ymd(now()).slice(0, 7), today = ymd(now());
-  let todos = [], sortBy = 'late';
-  const un = watchMonth(ym, rows => { todos = rows; draw(); });
+  const today = ymd(now());
+  let todos = [], sortBy = 'late', month = today.slice(0, 7), week = 0, un = null;
+  const sub = () => { if (un) un(); un = watchMonth(month, rows => { todos = rows; draw(); }); };
+  sub();
   const people = () => (seesAllTasks() || isHR()) ? activePeople() : supervisedPeople();
   function stats(p) {
-    const ts = allTasks().filter(t => t.assignee === p.email);
+    const range = periodRange(month, week);
+    const ts = allTasks().filter(t => t.assignee === p.email && inPeriod(t, range));
     const open = ts.filter(t => t.status !== 'done');
-    const done = ts.filter(t => t.status === 'done' && doneDay(t).slice(0, 7) === ym);
+    const done = ts.filter(t => t.status === 'done');
     const onTime = done.filter(t => !t.due || doneDay(t) <= t.due).length;
-    const td = todos.filter(x => x.owner === p.email), tdToday = td.filter(x => x.date === today);
+    const td = todos.filter(x => x.owner === p.email && x.date >= range.from && x.date <= range.to), tdToday = td.filter(x => x.date === today);
     return { p, open: open.length, review: open.filter(t => t.status === 'review').length, hold: open.filter(t => t.status === 'hold').length, late: open.filter(isLate).length,
       done: done.length, onTime: done.length ? Math.round(onTime / done.length * 100) : null,
       todayDone: tdToday.filter(x => x.done).length, todayAll: tdToday.length, monthPct: td.length ? Math.round(td.filter(x => x.done).length / td.length * 100) : null,
@@ -391,9 +398,9 @@ function teamTab(body, actions) {
         ${tile('fa-list-check', 'brand', L('تاسكات مفتوحة', 'Open tasks'), sum('open'), L(`عند ${rows.filter(r => r.open).length} شخص`, `held by ${rows.filter(r => r.open).length} people`))}
         ${tile('fa-triangle-exclamation', 'bad', L('متأخرة', 'Late'), sum('late'), L(`${rows.filter(r => r.late).length} شخص عنده متأخر`, `${rows.filter(r => r.late).length} people have late tasks`))}
         ${tile('fa-magnifying-glass', 'info', L('مستنية مراجعة', 'Waiting for review'), sum('review'))}
-        ${tile('fa-circle-check', 'ok', L('خلصت الشهر ده', 'Finished this month'), sum('done'), L(`To-Do النهارده: ${tdDone}/${tdAll}`, `To-Do today: ${tdDone}/${tdAll}`))}
+        ${tile('fa-circle-check', 'ok', week ? L(`خلصت في أسبوع ${week}`, `Finished in week ${week}`) : L(`خلصت في ${monthName(month)}`, `Finished in ${monthName(month)}`), sum('done'), L(`To-Do النهارده: ${tdDone}/${tdAll}`, `To-Do today: ${tdDone}/${tdAll}`))}
       </div>
-      <div class="row between mb-8 wrap gap-8"><b>${L(`${rows.length} شخص`, `${rows.length} people`)}</b><div class="seg">${[['late', L('المتأخر', 'Late')], ['open', L('المفتوح', 'Open')], ['done', L('المنجز', 'Done')], ['todo', 'To-Do'], ['name', L('الاسم', 'Name')]].map(([k, t]) => `<button data-tsort="${k}" class="${sortBy === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+      <div class="row between mb-8 wrap gap-8"><div class="row gap-8 wrap"><b>${L(`${rows.length} شخص`, `${rows.length} people`)}</b>${periodPicker(month, week)}</div><div class="seg">${[['late', L('المتأخر', 'Late')], ['open', L('المفتوح', 'Open')], ['done', L('المنجز', 'Done')], ['todo', 'To-Do'], ['name', L('الاسم', 'Name')]].map(([k, t]) => `<button data-tsort="${k}" class="${sortBy === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
       <div class="tm-grid">${rows.map(r => `<div class="card tm-card ${r.late ? 'has-late' : ''}">
         <div class="row gap-10">${avatar(r.p, '')}<div class="grow min0"><b class="truncate">${esc(r.p.name || r.p.email)}</b><small class="muted truncate">${esc(r.p.title || '')}${r.p.department ? ' · ' + esc(r.p.department) : ''}</small></div></div>
         <div class="tm-stats"><div><b class="num">${r.open}</b><small>${L('مفتوحة', 'Open')}</small></div><div class="${r.late ? 'bad' : ''}"><b class="num">${r.late}</b><small>${L('متأخرة', 'Late')}</small></div><div><b class="num">${r.review}</b><small>${L('مراجعة', 'Review')}</small></div><div class="ok"><b class="num">${r.done}</b><small>${L('خلصت', 'Done')}</small></div></div>
@@ -402,10 +409,12 @@ function teamTab(body, actions) {
         <div class="row gap-8"><button class="btn btn-sm grow" data-tasks-of="${esc(r.p.email)}"><i class="fas fa-clipboard-check"></i> ${L('التاسكات', 'Tasks')}</button><a class="btn btn-sm grow" href="#/todo/${encodeURIComponent(r.p.email)}"><i class="fas fa-square-check"></i> To-Do</a></div>
       </div>`).join('') || `<div class="card">${empty('fa-people-group', L('مفيش حد في فريقك', 'Nobody in your team'))}</div>`}</div>`;
   }
+  body.onchange = (e) => { if (e.target.matches('[data-pp-month]')) { month = e.target.value; week = 0; sub(); draw(); } };
   body.onclick = (e) => {
+    const w = e.target.closest('[data-pp-week]'); if (w) { week = Number(w.dataset.ppWeek); draw(); return; }
     const s = e.target.closest('[data-tsort]'); if (s) { sortBy = s.dataset.tsort; draw(); return; }
     const t = e.target.closest('[data-tasks-of]'); if (t) openTasksOf(t.dataset.tasksOf);
   };
   const off = onTasks(draw), off2 = onDirectory(draw);
-  return () => { un(); off(); off2(); };
+  return () => { if (un) un(); off(); off2(); };
 }
