@@ -9,7 +9,7 @@ import { migrate } from '../services/migration.js';
 import { allPeople, officialDepartments, addDepartment } from '../services/directory.js';
 import { db, doc, writeBatch } from '../core/fb.js';
 import { track } from '../services/activity.js';
-import { PILLARS, PILLAR_META, pillarLabel, evalSettings, saveEvalSettings } from '../services/evaluations.js';
+import { METRICS, TEMPLATES, metricLabel, evalSettings, saveEvalSettings } from '../services/evaluations.js';
 
 const DAYS = () => isAr ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const FIXED_EG_HOLIDAYS = [
@@ -248,64 +248,56 @@ export default async function render(root, { params = [] } = {}) {
       } catch (ex) { toastErr(ex); }
     });
   };
-  // performance reviews: pillar weights, grade bands, star criteria, KPIs per department, salary link
+  // performance: the criteria of each template (name, weight, what measures it), grade bands and the salary link
   P.eval = () => {
     const e = structuredClone(evalSettings());
-    const depts = officialDepartments();
-    let dept = depts[0] || '';
-    const wsum = () => PILLARS.reduce((s, k) => s + (Number(e.weights[k]) || 0), 0);
-    const sumBadge = () => `<span class="badge ${wsum() === 100 ? 'ok' : 'warn'}" id="ev-wsum">${L('المجموع', 'Total')} ${wsum()}%</span>`;
+    const kinds = { employee: ['employee', 'both'], leader: ['leader', 'both'] };
+    const sum = (t) => e.templates[t].reduce((s, c) => s + (Number(c.weight) || 0), 0);
+    const sumBadge = (t) => `<span class="badge ${sum(t) === 100 ? 'ok' : 'warn'}" data-sum="${t}">${L('المجموع', 'Total')} ${sum(t)}%</span>`;
     const del = (attr, i) => `<button type="button" class="btn btn-ghost btn-icon btn-sm" ${attr}="${i}" title="${L('حذف', 'Delete')}" style="color:var(--bad)"><i class="fas fa-trash"></i></button>`;
+    const tplCard = (t) => `<section class="card ev-span"><div class="card-head"><h3><i class="fas ${t === 'leader' ? 'fa-user-tie' : 'fa-user'}"></i> ${L(`معايير ${TEMPLATES[t][0]}`, `${TEMPLATES[t][1]} criteria`)}</h3>${sumBadge(t)}</div>
+      <div class="card-body"><div class="ev-khead xs muted"><span class="grow">${L('المعيار', 'Criterion')}</span><span style="width:260px">${L('بيتقاس بإيه', 'Measured by')}</span><span style="width:80px">${L('الوزن', 'Weight')}</span><span style="width:32px"></span></div>
+        ${e.templates[t].map((c, i) => `<div class="ev-wrow"><input class="input grow" data-t="${t}" data-i="${i}" data-f="name" value="${esc(c.name)}">
+          <select class="select" data-t="${t}" data-i="${i}" data-f="source" style="width:260px">${Object.entries(METRICS).filter(([, m]) => kinds[t].includes(m.kind)).map(([k]) => `<option value="${k}" ${k === c.source ? 'selected' : ''}>${esc(metricLabel(k))}</option>`).join('')}</select>
+          <input class="input num" type="number" min="0" max="100" data-t="${t}" data-i="${i}" data-f="weight" value="${esc(c.weight)}" style="width:80px">${del(`data-del-${t}`, i)}</div>`).join('')}
+        <button type="button" class="btn btn-sm mt-8" data-add="${t}"><i class="fas fa-plus"></i> ${L('معيار', 'Criterion')}</button></div></section>`;
     const draw = () => {
-      const ks = e.kpis[dept] || [];
       pane.innerHTML = `<div class="ev-set">
-        <section class="card"><div class="card-head"><h3><i class="fas fa-scale-balanced"></i> ${L('أوزان المحاور', 'Pillar weights')}</h3>${sumBadge()}</div>
-          <div class="card-body"><p class="small muted mb-8">${L('نصيب كل محور من الدرجة النهائية (من 100). لو محور ملوش داتا في أسبوع (مثلاً مفيش تاسكات) بيتشال والباقي بيتوزع بنفس النسب.', 'Each pillar\'s share of the final score. A pillar with no data in a week is left out and the rest are scaled.')}</p>
-          ${PILLARS.map(k => `<label class="ev-wrow"><span class="icon-tile" style="background:${PILLAR_META[k].color}1f;color:${PILLAR_META[k].color}"><i class="fas ${PILLAR_META[k].icon}"></i></span><b class="grow">${esc(pillarLabel(k))}</b><input class="input num" type="number" min="0" max="100" data-w="${k}" value="${esc(e.weights[k])}"><span>%</span></label>`).join('')}
-          <p class="xs muted mt-8">${L('الحضور والتاسكات بيتحسبوا أوتوماتيك من السيستم؛ الـ KPIs والنجوم بيدخلهم اللي بيقيّم.', 'Attendance and tasks are automatic; KPIs and stars are entered by the reviewer.')}</p></div></section>
-        <section class="card"><div class="card-head"><h3><i class="fas fa-ranking-star"></i> ${L('التقديرات', 'Grades')}</h3><button type="button" class="btn btn-sm" id="g-add"><i class="fas fa-plus"></i> ${L('تقدير', 'Grade')}</button></div>
-          <div class="card-body"><p class="small muted mb-8">${L('التقدير بيتحدد من الدرجة: من الحد الأدنى ده وطالع.', 'A grade applies from its minimum score up.')}</p>
-          ${e.grades.map((g, i) => `<div class="ev-wrow"><input class="input grow" data-g="${i}" data-f="name" value="${esc(g.name)}" placeholder="${L('اسم التقدير', 'Grade name')}"><span class="xs muted">${L('من', 'from')}</span><input class="input num" type="number" min="0" max="100" data-g="${i}" data-f="min" value="${esc(g.min)}">${del('data-gdel', i)}</div>`).join('')}</div></section>
-        <section class="card"><div class="card-head"><h3><i class="fas fa-star"></i> ${L('بنود التقييم بالنجوم', 'Star criteria')}</h3><button type="button" class="btn btn-sm" id="c-add"><i class="fas fa-plus"></i> ${L('بند', 'Criterion')}</button></div>
-          <div class="card-body">${e.criteria.map((c, i) => `<div class="ev-wrow"><input class="input grow" data-c="${i}" value="${esc(c)}">${del('data-cdel', i)}</div>`).join('')}</div></section>
-        <section class="card"><div class="card-head"><h3><i class="fas fa-bullseye"></i> ${L('الـ KPIs لكل قسم', 'KPIs per department')}</h3>
-          <select class="select select-sm" id="k-dept">${depts.map(d => `<option ${d === dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
-          <div class="card-body"><p class="small muted mb-8">${L('المستهدف شهري — مستهدف الأسبوع = الشهري ÷ 4 (وتقدر تعدّله وانت بتقيّم). الوزن = أهمية المؤشر جوه المحور.', 'Targets are monthly — a week\'s target is a quarter (editable while reviewing). Weight = importance within the pillar.')}</p>
-          ${ks.length ? `<div class="ev-khead xs muted"><span class="grow">${L('المؤشر', 'KPI')}</span><span>${L('الوحدة', 'Unit')}</span><span>${L('المستهدف الشهري', 'Monthly target')}</span><span>${L('الوزن', 'Weight')}</span><span style="width:32px"></span></div>` : ''}
-          ${ks.map((k, i) => `<div class="ev-wrow"><input class="input grow" data-k="${i}" data-f="name" value="${esc(k.name)}" placeholder="${L('مثلاً: مقالات منشورة', 'e.g. Articles published')}"><input class="input" data-k="${i}" data-f="unit" value="${esc(k.unit || '')}" placeholder="${L('مقال', 'article')}" style="width:90px"><input class="input num" type="number" min="0" step="any" data-k="${i}" data-f="target" value="${esc(k.target)}"><input class="input num" type="number" min="1" max="10" data-k="${i}" data-f="weight" value="${esc(k.weight || 1)}" style="width:70px">${del('data-kdel', i)}</div>`).join('') || empty('fa-bullseye', L(`مفيش KPIs لقسم ${dept}`, `No KPIs for ${dept}`))}
-          <button type="button" class="btn btn-sm mt-8" id="k-add"><i class="fas fa-plus"></i> ${L('مؤشر', 'KPI')}</button></div></section>
-        <section class="card"><div class="card-head"><h3><i class="fas fa-money-check-dollar"></i> ${L('الربط بالمرتب', 'Salary link')}</h3></div>
-          <div class="card-body">${sw('salaryLink', L('ربط جزء الـ KPI في المرتب بالتقييم', 'Tie the salary\'s KPI part to the review'), e.salaryLink, L('لما يكون شغال: وانت بتحسب الرواتب، جزء الـ KPI بياخد نسبة درجة الـ KPIs في تقييم الشهر (مثلاً 80 → 80% من الـ KPI). لو عدّلت الـ KPI بإيدك في الراتب، تعديلك هو اللي بيمشي.', 'When on: building payroll pays the KPI part at the month\'s KPI score (e.g. 80 → 80%). A KPI you set by hand on a salary wins.'))}</div></section>
+        <p class="small muted ev-span"><i class="fas fa-circle-info"></i> ${L('كل معيار بيتحسب من السيستم أوتوماتيك، ما عدا «تقييم المدير» اللي بيدّي فيه الليدر درجة من 5 ولازم يكتب الدليل. لو معيار ملوش داتا في الشهر بيتشال والباقي بيتوزع بنفس النسب. الليدر والسوبر فايزر وأي حد عليه فريق بيتقيّم بمعايير الليدر.', 'Every criterion is measured by the system except "Manager rating" (1–5 stars with written evidence). A criterion with no data is left out and the rest scaled. Anyone leading a team uses the leader criteria.')}</p>
+        ${tplCard('employee')}${tplCard('leader')}
+        <section class="card ev-span"><div class="card-head"><h3><i class="fas fa-ranking-star"></i> ${L('التقديرات وأثرها', 'Grades and their effect')}</h3><button type="button" class="btn btn-sm" id="g-add"><i class="fas fa-plus"></i> ${L('تقدير', 'Grade')}</button></div>
+          <div class="card-body"><div class="ev-khead xs muted"><span style="width:180px">${L('التقدير', 'Grade')}</span><span style="width:80px">${L('من درجة', 'From')}</span><span class="grow">${L('الأثر', 'Effect')}</span><span style="width:110px">${L('% من المتغير', '% of variable')}</span><span style="width:32px"></span></div>
+          ${e.grades.map((g, i) => `<div class="ev-wrow"><input class="input" data-g="${i}" data-f="name" value="${esc(g.name)}" style="width:180px"><input class="input num" type="number" min="0" max="100" data-g="${i}" data-f="min" value="${esc(g.min)}" style="width:80px">
+            <input class="input grow" data-g="${i}" data-f="effect" value="${esc(g.effect || '')}"><input class="input num" type="number" min="0" max="100" data-g="${i}" data-f="variable" value="${esc(g.variable ?? 100)}" style="width:110px">${del('data-gdel', i)}</div>`).join('')}</div></section>
+        <section class="card ev-span"><div class="card-head"><h3><i class="fas fa-money-check-dollar"></i> ${L('الربط بالمرتب', 'Salary link')}</h3></div>
+          <div class="card-body">${sw('salaryLink', L('جزء المتغير (KPI) في المرتب يمشي على التقدير', 'Pay the variable (KPI) part by grade'), e.salaryLink, L('لما يكون شغال ويتبعت تقييم الشهر: وانت بتحسب الرواتب، جزء الـ KPI بياخد نسبة التقدير (مثلاً «تقريب من التوقعات» = 50%). لو عدّلت الـ KPI بإيدك في الراتب، تعديلك هو اللي بيمشي.', 'When on and the month\'s review is sent, the KPI part is paid at the grade\'s share. A KPI set by hand on a salary wins.'))}</div></section>
       </div>${saveBar('ev-save')}`;
     };
     const readAll = () => {
-      pane.querySelectorAll('[data-w]').forEach(i => { e.weights[i.dataset.w] = Number(i.value) || 0; });
-      pane.querySelectorAll('[data-g]').forEach(i => { e.grades[i.dataset.g][i.dataset.f] = i.dataset.f === 'min' ? Number(i.value) || 0 : i.value; });
-      pane.querySelectorAll('[data-c]').forEach(i => { e.criteria[i.dataset.c] = i.value; });
-      const ks = e.kpis[dept] || [];
-      pane.querySelectorAll('[data-k]').forEach(i => { ks[i.dataset.k][i.dataset.f] = ['target', 'weight'].includes(i.dataset.f) ? (i.value === '' ? '' : Number(i.value)) : i.value; });
+      pane.querySelectorAll('[data-t]').forEach(i => { const c = e.templates[i.dataset.t][i.dataset.i]; c[i.dataset.f] = i.dataset.f === 'weight' ? Number(i.value) || 0 : i.value; });
+      pane.querySelectorAll('[data-g]').forEach(i => { e.grades[i.dataset.g][i.dataset.f] = ['min', 'variable'].includes(i.dataset.f) ? Number(i.value) || 0 : i.value; });
       const l = pane.querySelector('[name="salaryLink"]'); if (l) e.salaryLink = l.checked;
     };
-    pane.oninput = (ev) => { if (ev.target.dataset.w != null) { readAll(); pane.querySelector('#ev-wsum').outerHTML = sumBadge(); } };
-    pane.onchange = (ev) => { if (ev.target.id === 'k-dept') { readAll(); dept = ev.target.value; draw(); } };
+    pane.oninput = (ev) => { if (ev.target.dataset.f === 'weight') { readAll(); const t = ev.target.dataset.t; pane.querySelector(`[data-sum="${t}"]`).outerHTML = sumBadge(t); } };
     pane.onclick = (ev) => {
       const b = ev.target.closest('button'); if (!b) return;
       const redo = (fn) => { readAll(); fn(); draw(); };
-      if (b.id === 'g-add') redo(() => e.grades.push({ name: '', min: 0 }));
-      else if (b.id === 'c-add') redo(() => e.criteria.push(''));
-      else if (b.id === 'k-add') redo(() => { (e.kpis[dept] = e.kpis[dept] || []).push({ id: 'k' + Date.now().toString(36), name: '', unit: '', target: '', weight: 1 }); });
+      if (b.dataset.add) redo(() => e.templates[b.dataset.add].push({ id: 'c' + Date.now().toString(36), name: '', weight: 0, source: 'manual' }));
+      else if (b.dataset.delEmployee != null) redo(() => e.templates.employee.splice(Number(b.dataset.delEmployee), 1));
+      else if (b.dataset.delLeader != null) redo(() => e.templates.leader.splice(Number(b.dataset.delLeader), 1));
+      else if (b.id === 'g-add') redo(() => e.grades.push({ name: '', min: 0, effect: '', variable: 0 }));
       else if (b.dataset.gdel != null) redo(() => e.grades.splice(Number(b.dataset.gdel), 1));
-      else if (b.dataset.cdel != null) redo(() => e.criteria.splice(Number(b.dataset.cdel), 1));
-      else if (b.dataset.kdel != null) redo(() => e.kpis[dept].splice(Number(b.dataset.kdel), 1));
       else if (b.id === 'ev-save') busy(b, async () => {
         readAll();
-        if (wsum() <= 0) { toast(L('لازم محور واحد على الأقل يكون ليه وزن', 'At least one pillar needs a weight'), '', 'warn'); return; }
-        const grades = e.grades.filter(g => String(g.name).trim()).map(g => ({ name: String(g.name).trim().slice(0, 40), min: Math.max(0, Math.min(100, Number(g.min) || 0)) })).sort((a, b) => b.min - a.min);
+        const templates = {};
+        for (const t of ['employee', 'leader']) {
+          templates[t] = e.templates[t].filter(c => String(c.name).trim()).map(c => ({ id: c.id || 'c' + Math.random().toString(36).slice(2, 8), name: String(c.name).trim().slice(0, 80), weight: Math.max(0, Math.min(100, Number(c.weight) || 0)), source: METRICS[c.source] ? c.source : 'manual' }));
+          if (!templates[t].some(c => c.weight > 0)) { toast(L('لازم معيار واحد على الأقل ليه وزن', 'At least one criterion needs a weight'), '', 'warn'); return; }
+        }
+        const grades = e.grades.filter(g => String(g.name).trim()).map(g => ({ name: String(g.name).trim().slice(0, 40), min: Math.max(0, Math.min(100, Number(g.min) || 0)), effect: String(g.effect || '').trim().slice(0, 120), variable: Math.max(0, Math.min(100, Number(g.variable) || 0)) })).sort((x, y) => y.min - x.min);
         if (!grades.length) { toast(L('لازم تقدير واحد على الأقل', 'Add at least one grade'), '', 'warn'); return; }
-        if (!grades.some(g => g.min === 0)) grades[grades.length - 1].min = 0;     // the lowest grade covers everything below
-        const kpis = {};
-        Object.entries(e.kpis).forEach(([d, ks]) => { kpis[d] = (ks || []).filter(k => String(k.name).trim()).map(k => ({ id: k.id || 'k' + Math.random().toString(36).slice(2, 8), name: String(k.name).trim().slice(0, 80), unit: String(k.unit || '').trim().slice(0, 20), target: Number(k.target) || 0, weight: Math.max(1, Math.min(10, Number(k.weight) || 1)) })); });
-        const next = { weights: e.weights, grades, criteria: e.criteria.map(c => String(c).trim().slice(0, 60)).filter(Boolean), kpis, salaryLink: !!e.salaryLink };
+        grades[grades.length - 1].min = 0;     // the lowest grade covers everything below
+        const next = { templates, grades, salaryLink: !!e.salaryLink };
         try { await saveEvalSettings(next); policy.evaluation = { ...(policy.evaluation || {}), ...next }; Object.assign(e, structuredClone(evalSettings())); toast(L('اتحفظت إعدادات التقييم', 'Review settings saved')); draw(); } catch (ex) { toastErr(ex); }
       });
     };

@@ -16,7 +16,7 @@ const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'ما
 const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const monthName = (m) => `${L(MONTHS_AR, MONTHS_EN)[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 /** month + "the whole month / week 1–4" picker. allMonths: offer "any month". Events: [data-pp-month] change, [data-pp-week] click */
-export function periodPicker(month, week, { allMonths = false, back = 12, ahead = 3 } = {}) {
+export function periodPicker(month, week, { allMonths = false, back = 12, ahead = 3, weeks: withWeeks = true } = {}) {
   const cur = ymd(now()).slice(0, 7);
   const list = [];
   for (let i = -back; i <= ahead; i++) { const d = new Date(Date.UTC(Number(cur.slice(0, 4)), Number(cur.slice(5, 7)) - 1 + i, 1)); list.push(d.toISOString().slice(0, 7)); }
@@ -26,10 +26,10 @@ export function periodPicker(month, week, { allMonths = false, back = 12, ahead 
   const weeks = WEEK_DAYS.map(([a, b], i) => [i + 1, `${a}–${Math.min(b, last)}`]);
   return `<div class="tk-period">
     <select class="select" data-pp-month>${allMonths ? `<option value="">${L('كل الشهور', 'Any month')}</option>` : ''}${list.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(monthName(m))}${m === cur ? ` · ${L('الحالي', 'current')}` : ''}</option>`).join('')}</select>
-    <div class="seg tk-weeks ${month ? '' : 'off'}" title="${month ? '' : L('اختار الشهر الأول', 'Pick a month first')}">
+    ${withWeeks ? `<div class="seg tk-weeks ${month ? '' : 'off'}" title="${month ? '' : L('اختار الشهر الأول', 'Pick a month first')}">
       <button type="button" data-pp-week="0" class="${!week ? 'on' : ''}" ${month ? '' : 'disabled'}>${L('الشهر كله', 'Whole month')}</button>
       ${weeks.map(([w, r]) => `<button type="button" data-pp-week="${w}" class="${week === w ? 'on' : ''}" ${month ? '' : 'disabled'}>${L(`أسبوع ${w}`, `Week ${w}`)}<small dir="ltr">${r}</small></button>`).join('')}
-    </div></div>`;
+    </div>` : ''}</div>`;
 }
 const first = (e) => String(nameOf(e) || '').split(' ')[0];
 export const stamp = (ms) => ms ? esc(ymd(ms) === ymd(now()) ? fmtTime(ms) : `${fmtDate(ymd(ms))} ${fmtTime(ms)}`) : '';

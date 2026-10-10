@@ -18,8 +18,7 @@ const ROUTES = [
   { id: 'announcements', group: 'me', icon: 'fa-bullhorn', ar: 'الإعلانات', en: 'Announcements', load: () => import('./views/announcements.js'), badge: 'ann' },
   { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
   { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js') },
-  { id: 'stats', group: 'me', icon: 'fa-chart-line', ar: 'إحصائياتي', en: 'My stats', load: () => import('./views/stats.js') },
-  { id: 'evaluations', group: 'me', icon: 'fa-star-half-stroke', ar: 'التقييم', en: 'Reviews', load: () => import('./views/evaluations.js') },
+  { id: 'stats', group: 'me', icon: 'fa-chart-line', ar: 'الأداء', en: 'Performance', load: () => import('./views/stats.js'), badge: 'eval' },
   { id: 'payslips', group: 'me', icon: 'fa-receipt', ar: 'قسائم الراتب', en: 'Payslips', load: () => import('./views/payslips.js') },
   { id: 'profile', group: 'me', icon: 'fa-circle-user', ar: 'حسابي', en: 'My profile', load: () => import('./views/profile.js') },
   { id: 'notifications', group: null, icon: 'fa-bell', ar: 'الإشعارات', en: 'Notifications', load: () => import('./views/notifications.js') },
@@ -46,7 +45,7 @@ const GROUPS = {
 };
 
 let current = null; // { id, cleanup }
-let inboxCount = 0, chatCount = 0, annCount = 0, taskCount = 0;
+let inboxCount = 0, chatCount = 0, annCount = 0, taskCount = 0, evalCount = 0;
 const allowed = (r) => !r.when || r.when();
 
 function renderNav() {
@@ -89,6 +88,7 @@ function renderUserChip() {
 function setBadges() {
   document.querySelectorAll('[data-badge="inbox"]').forEach(b => { b.textContent = inboxCount; b.classList.toggle('hidden', !inboxCount); });
   document.querySelectorAll('[data-badge="ann"]').forEach(b => { b.textContent = annCount; b.classList.toggle('hidden', !annCount); });
+  document.querySelectorAll('[data-badge="eval"]').forEach(b => { b.textContent = evalCount; b.classList.toggle('hidden', !evalCount); });
   document.querySelectorAll('[data-badge="tasks"]').forEach(b => { b.textContent = taskCount > 99 ? '99+' : taskCount; b.classList.toggle('hidden', !taskCount); });
   const n = unreadCount();
   const bc = byId('bell-count'); bc.textContent = n > 9 ? '9+' : n; bc.classList.toggle('hidden', !n);
@@ -149,7 +149,8 @@ async function startAnnouncementWatcher() {
 
 async function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'home';
-  const [id, ...rest] = hash.split('/');
+  let [id, ...rest] = hash.split('/');
+  if (id === 'evaluations') { location.replace('#/stats'); return; }   // the old reviews page is now part of «الأداء»
   let r = ROUTES.find(x => x.id === id);
   const fallback = !r || !allowed(r);
   if (fallback) r = ROUTES[0];
@@ -264,6 +265,7 @@ async function boot() {
   startAnnouncementWatcher().catch(e => console.warn('announcements', e && e.message));
   import('./services/tasks.js').then(t => { t.startTasks(); t.onTasks(() => { taskCount = t.badgeCount(); setBadges(); if (isAdmin()) t.syncSupervisors().catch(e => console.warn('supervisors', e && e.message)); }); }).catch(e => console.warn('tasks', e && e.message));
   onNotifications(setBadges);
+  if (isLeader() || isAdmin() || isPM() || isHR()) import('./services/evaluations.js').then(ev => ev.watchPending(rows => { evalCount = rows.length; setBadges(); })).catch(e => console.warn('reviews', e && e.message));
   if (canApprove()) watchInbox(rows => { inboxCount = rows.length; setBadges(); });
   renderNav();
   startClock();

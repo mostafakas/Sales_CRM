@@ -11,7 +11,7 @@ import { teamMonth } from './reports.js';
 import { notify } from './notify.js';
 import { track } from './activity.js';
 import { salaryParts, rulesOf, violationsFrom, priceViolations } from './salary.js';
-import { evalSettings, monthOf } from './evaluations.js';
+import { evalSettings, evalId } from './evaluations.js';
 
 export const itemId = (month, email) => `${month}_${email}`;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -106,13 +106,13 @@ export async function buildRun(month) {
     list(col('employees_private')), list(query(col('payroll_items'), where('month', '==', month))),
     teamMonth(month, { people }), activeAdvances(month)
   ]);
-  // optional (Settings → Reviews): the KPI part follows the month's KPI score, unless the admin set the KPI by hand
+  // optional (Settings → Reviews): the KPI part = the grade's share of the variable, once the month's review is sent —
+  // unless the admin set the KPI by hand
   const link = !!evalSettings().salaryLink;
   const evals = link ? await list(query(col('evaluations'), where('month', '==', month))).catch(() => []) : [];
   const kpiFromReview = (email) => {
-    const mine = evals.filter(e => e.email === email);
-    const m = mine.find(e => !e.week) || monthOf(mine.filter(e => e.week));
-    return m && m.scores && m.scores.kpis != null ? Math.min(100, m.scores.kpis) : null;
+    const ev = evals.find(e => e.id === evalId(email, month) && e.sent);
+    return ev && ev.variable != null ? Math.max(0, Math.min(100, Number(ev.variable))) : null;
   };
   const b = writeBatch(db);
   let count = 0;
