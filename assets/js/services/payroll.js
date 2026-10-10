@@ -11,6 +11,7 @@ import { teamMonth } from './reports.js';
 import { notify } from './notify.js';
 import { track } from './activity.js';
 import { salaryParts, rulesOf, violationsFrom, priceViolations } from './salary.js';
+import { evalSettings, monthOf } from './evaluations.js';
 
 export const itemId = (month, email) => `${month}_${email}`;
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -105,6 +106,14 @@ export async function buildRun(month) {
     list(col('employees_private')), list(query(col('payroll_items'), where('month', '==', month))),
     teamMonth(month, { people }), activeAdvances(month)
   ]);
+  // optional (Settings → Reviews): the KPI part follows the month's KPI score, unless the admin set the KPI by hand
+  const link = !!evalSettings().salaryLink;
+  const evals = link ? await list(query(col('evaluations'), where('month', '==', month))).catch(() => []) : [];
+  const kpiFromReview = (email) => {
+    const mine = evals.filter(e => e.email === email);
+    const m = mine.find(e => !e.week) || monthOf(mine.filter(e => e.week));
+    return m && m.scores && m.scores.kpis != null ? Math.min(100, m.scores.kpis) : null;
+  };
   const b = writeBatch(db);
   let count = 0;
   for (const p of people) {
@@ -114,8 +123,14 @@ export async function buildRun(month) {
     if (old.status && payStatus(old) !== 'pending') continue; // approved / transferred / sent are frozen
     const pm = att.people.find(x => x.person.email === p.email) || {};
     const violations = pm.rows ? violationsFrom(pm.rows, pm.requests) : [];
-    const item = computeItem({ person: p, priv, totals: pm.totals, violations, advances: advs.filter(a => a.email === p.email), manual: old });
-    b.set(doc(db, 'payroll_items', itemId(month, p.email)), { ...item, month, status: 'pending', published: false, updatedAt: serverTimestamp() });
+    let manual = old;
+    if (!old.kpiMode || old.kpiFromReview) {
+      const k = link ? kpiFromReview(p.email) : null;
+      if (k != null) manual = { ...old, kpiMode: 'pct', kpiValue: k };
+      else if (old.kpiFromReview) manual = { ...old, kpiMode: '', kpiValue: null };     // the link was switched off / no review any more
+    }
+    const item = computeItem({ person: p, priv, totals: pm.totals, violations, advances: advs.filter(a => a.email === p.email), manual });
+    b.set(doc(db, 'payroll_items', itemId(month, p.email)), { ...item, kpiFromReview: manual !== old ? manual.kpiMode === 'pct' : !!old.kpiFromReview && !!old.kpiMode, month, status: 'pending', published: false, updatedAt: serverTimestamp() });
     count++;
   }
   b.set(doc(db, 'payroll_runs', month), { month, status: 'draft', builtBy: session.email, builtAt: serverTimestamp() }, { merge: true });
@@ -132,7 +147,9 @@ export async function saveManual(month, email, manual) {
   const totals = it.att || null; // attendance numbers captured when the run was built
   const advances = (it.advanceRefs || []).map(a => ({ id: a.id, installment: a.amount, amount: a.total, paid: a.paidBefore, installments: a.count, perMonth: a.perMonth, startMonth: a.startMonth, endMonth: a.endMonth }));
   const next = computeItem({ person: p, priv, totals, violations: (it.att && it.att.violations) || [], advances, manual });
-  await updateDoc(doc(db, 'payroll_items', itemId(month, email)), { ...next, updatedAt: serverTimestamp(), editedBy: session.email });
+  // a KPI changed by hand is the admin's from now on (no longer follows the review)
+  const fromReview = !!it.kpiFromReview && next.kpiMode === it.kpiMode && Number(next.kpiValue) === Number(it.kpiValue);
+  await updateDoc(doc(db, 'payroll_items', itemId(month, email)), { ...next, kpiFromReview: fromReview, updatedAt: serverTimestamp(), editedBy: session.email });
 }
 
 // ---------- transfer receipt (stored in Firestore chunks, like chat files) ----------

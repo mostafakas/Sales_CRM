@@ -42,6 +42,8 @@ const ACTIONS = {
   'notion.wipe': ['مسح بيانات Notion', 'Deleted the Notion data', 'fa-trash-can', 'warn'],
   'notion.import': ['استيراد من Notion', 'Imported from Notion', 'fa-file-import', 'brand'],
   'task.create': ['عمل تاسك', 'Created a task', 'fa-clipboard-check', 'brand'],
+  'eval.save': ['سجّل تقييم أداء', 'Saved a performance review', 'fa-star-half-stroke', 'info'],
+  'eval.send': ['بعت تقييم أداء', 'Sent a performance review', 'fa-star-half-stroke', 'brand'],
   'task.delete': ['حذف تاسك', 'Deleted a task', 'fa-clipboard-check', 'warn'],
   'task.selftasks': ['غيّر صلاحية التاسكات الشخصية', 'Changed self-task access', 'fa-user-gear', 'info'],
   'task.migrate': ['نقل تاسكات الشات', 'Moved chat tasks', 'fa-clipboard-check', 'info'],

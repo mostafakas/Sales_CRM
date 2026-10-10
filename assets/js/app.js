@@ -19,6 +19,7 @@ const ROUTES = [
   { id: 'requests', group: 'me', icon: 'fa-paper-plane', ar: 'طلباتي', en: 'My requests', load: () => import('./views/requests.js'), bottom: true },
   { id: 'attendance', group: 'me', icon: 'fa-calendar-check', ar: 'حضوري', en: 'My attendance', load: () => import('./views/attendance.js') },
   { id: 'stats', group: 'me', icon: 'fa-chart-line', ar: 'إحصائياتي', en: 'My stats', load: () => import('./views/stats.js') },
+  { id: 'evaluations', group: 'me', icon: 'fa-star-half-stroke', ar: 'التقييم', en: 'Reviews', load: () => import('./views/evaluations.js') },
   { id: 'payslips', group: 'me', icon: 'fa-receipt', ar: 'قسائم الراتب', en: 'Payslips', load: () => import('./views/payslips.js') },
   { id: 'profile', group: 'me', icon: 'fa-circle-user', ar: 'حسابي', en: 'My profile', load: () => import('./views/profile.js') },
   { id: 'notifications', group: null, icon: 'fa-bell', ar: 'الإشعارات', en: 'Notifications', load: () => import('./views/notifications.js') },

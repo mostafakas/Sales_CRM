@@ -9,6 +9,7 @@ import { migrate } from '../services/migration.js';
 import { allPeople, officialDepartments, addDepartment } from '../services/directory.js';
 import { db, doc, writeBatch } from '../core/fb.js';
 import { track } from '../services/activity.js';
+import { PILLARS, PILLAR_META, pillarLabel, evalSettings, saveEvalSettings } from '../services/evaluations.js';
 
 const DAYS = () => isAr ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const FIXED_EG_HOLIDAYS = [
@@ -16,11 +17,11 @@ const FIXED_EG_HOLIDAYS = [
   ['06-30', 'ذكرى 30 يونيو'], ['07-23', 'عيد ثورة 23 يوليو'], ['10-06', 'عيد القوات المسلحة']
 ];
 
-export default async function render(root) {
+export default async function render(root, { params = [] } = {}) {
   const tabs = [
     ['work', L('مواعيد العمل', 'Work hours')], ['depts', L('الأقسام', 'Departments')], ['remote', L('الأونلاين والأذونات', 'Remote & permissions')], ['leave', L('أنواع الإجازات', 'Leave types')],
     ['holidays', L('العطلات الرسمية', 'Public holidays')], ['flow', L('مسارات الموافقة', 'Approval flows')], ['pay', L('قواعد الخصم', 'Deduction rules')],
-    ...(isAdmin() ? [['system', L('النظام والترحيل', 'System & migration')]] : [])
+    ...(isAdmin() ? [['eval', L('التقييم', 'Reviews')], ['system', L('النظام والترحيل', 'System & migration')]] : [])
   ];
   root.innerHTML = `<div class="page-head"><div><h2>${L('الإعدادات', 'Settings')}</h2><p>${L('التغييرات بتطبق على كل المستخدمين فوراً.', 'Changes apply to everyone immediately.')}</p></div></div>
     <div class="tabs mb-16" id="st">${tabs.map(([k, t], i) => `<button class="tab ${i ? '' : 'active'}" data-p="${k}">${esc(t)}</button>`).join('')}</div>
@@ -247,7 +248,74 @@ export default async function render(root) {
       } catch (ex) { toastErr(ex); }
     });
   };
-  const show = (k) => { root.querySelectorAll('#st .tab').forEach(t => t.classList.toggle('active', t.dataset.p === k)); P[k](); };
+  // performance reviews: pillar weights, grade bands, star criteria, KPIs per department, salary link
+  P.eval = () => {
+    const e = structuredClone(evalSettings());
+    const depts = officialDepartments();
+    let dept = depts[0] || '';
+    const wsum = () => PILLARS.reduce((s, k) => s + (Number(e.weights[k]) || 0), 0);
+    const sumBadge = () => `<span class="badge ${wsum() === 100 ? 'ok' : 'warn'}" id="ev-wsum">${L('المجموع', 'Total')} ${wsum()}%</span>`;
+    const del = (attr, i) => `<button type="button" class="btn btn-ghost btn-icon btn-sm" ${attr}="${i}" title="${L('حذف', 'Delete')}" style="color:var(--bad)"><i class="fas fa-trash"></i></button>`;
+    const draw = () => {
+      const ks = e.kpis[dept] || [];
+      pane.innerHTML = `<div class="ev-set">
+        <section class="card"><div class="card-head"><h3><i class="fas fa-scale-balanced"></i> ${L('أوزان المحاور', 'Pillar weights')}</h3>${sumBadge()}</div>
+          <div class="card-body"><p class="small muted mb-8">${L('نصيب كل محور من الدرجة النهائية (من 100). لو محور ملوش داتا في أسبوع (مثلاً مفيش تاسكات) بيتشال والباقي بيتوزع بنفس النسب.', 'Each pillar\'s share of the final score. A pillar with no data in a week is left out and the rest are scaled.')}</p>
+          ${PILLARS.map(k => `<label class="ev-wrow"><span class="icon-tile" style="background:${PILLAR_META[k].color}1f;color:${PILLAR_META[k].color}"><i class="fas ${PILLAR_META[k].icon}"></i></span><b class="grow">${esc(pillarLabel(k))}</b><input class="input num" type="number" min="0" max="100" data-w="${k}" value="${esc(e.weights[k])}"><span>%</span></label>`).join('')}
+          <p class="xs muted mt-8">${L('الحضور والتاسكات بيتحسبوا أوتوماتيك من السيستم؛ الـ KPIs والنجوم بيدخلهم اللي بيقيّم.', 'Attendance and tasks are automatic; KPIs and stars are entered by the reviewer.')}</p></div></section>
+        <section class="card"><div class="card-head"><h3><i class="fas fa-ranking-star"></i> ${L('التقديرات', 'Grades')}</h3><button type="button" class="btn btn-sm" id="g-add"><i class="fas fa-plus"></i> ${L('تقدير', 'Grade')}</button></div>
+          <div class="card-body"><p class="small muted mb-8">${L('التقدير بيتحدد من الدرجة: من الحد الأدنى ده وطالع.', 'A grade applies from its minimum score up.')}</p>
+          ${e.grades.map((g, i) => `<div class="ev-wrow"><input class="input grow" data-g="${i}" data-f="name" value="${esc(g.name)}" placeholder="${L('اسم التقدير', 'Grade name')}"><span class="xs muted">${L('من', 'from')}</span><input class="input num" type="number" min="0" max="100" data-g="${i}" data-f="min" value="${esc(g.min)}">${del('data-gdel', i)}</div>`).join('')}</div></section>
+        <section class="card"><div class="card-head"><h3><i class="fas fa-star"></i> ${L('بنود التقييم بالنجوم', 'Star criteria')}</h3><button type="button" class="btn btn-sm" id="c-add"><i class="fas fa-plus"></i> ${L('بند', 'Criterion')}</button></div>
+          <div class="card-body">${e.criteria.map((c, i) => `<div class="ev-wrow"><input class="input grow" data-c="${i}" value="${esc(c)}">${del('data-cdel', i)}</div>`).join('')}</div></section>
+        <section class="card"><div class="card-head"><h3><i class="fas fa-bullseye"></i> ${L('الـ KPIs لكل قسم', 'KPIs per department')}</h3>
+          <select class="select select-sm" id="k-dept">${depts.map(d => `<option ${d === dept ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></div>
+          <div class="card-body"><p class="small muted mb-8">${L('المستهدف شهري — مستهدف الأسبوع = الشهري ÷ 4 (وتقدر تعدّله وانت بتقيّم). الوزن = أهمية المؤشر جوه المحور.', 'Targets are monthly — a week\'s target is a quarter (editable while reviewing). Weight = importance within the pillar.')}</p>
+          ${ks.length ? `<div class="ev-khead xs muted"><span class="grow">${L('المؤشر', 'KPI')}</span><span>${L('الوحدة', 'Unit')}</span><span>${L('المستهدف الشهري', 'Monthly target')}</span><span>${L('الوزن', 'Weight')}</span><span style="width:32px"></span></div>` : ''}
+          ${ks.map((k, i) => `<div class="ev-wrow"><input class="input grow" data-k="${i}" data-f="name" value="${esc(k.name)}" placeholder="${L('مثلاً: مقالات منشورة', 'e.g. Articles published')}"><input class="input" data-k="${i}" data-f="unit" value="${esc(k.unit || '')}" placeholder="${L('مقال', 'article')}" style="width:90px"><input class="input num" type="number" min="0" step="any" data-k="${i}" data-f="target" value="${esc(k.target)}"><input class="input num" type="number" min="1" max="10" data-k="${i}" data-f="weight" value="${esc(k.weight || 1)}" style="width:70px">${del('data-kdel', i)}</div>`).join('') || empty('fa-bullseye', L(`مفيش KPIs لقسم ${dept}`, `No KPIs for ${dept}`))}
+          <button type="button" class="btn btn-sm mt-8" id="k-add"><i class="fas fa-plus"></i> ${L('مؤشر', 'KPI')}</button></div></section>
+        <section class="card"><div class="card-head"><h3><i class="fas fa-money-check-dollar"></i> ${L('الربط بالمرتب', 'Salary link')}</h3></div>
+          <div class="card-body">${sw('salaryLink', L('ربط جزء الـ KPI في المرتب بالتقييم', 'Tie the salary\'s KPI part to the review'), e.salaryLink, L('لما يكون شغال: وانت بتحسب الرواتب، جزء الـ KPI بياخد نسبة درجة الـ KPIs في تقييم الشهر (مثلاً 80 → 80% من الـ KPI). لو عدّلت الـ KPI بإيدك في الراتب، تعديلك هو اللي بيمشي.', 'When on: building payroll pays the KPI part at the month\'s KPI score (e.g. 80 → 80%). A KPI you set by hand on a salary wins.'))}</div></section>
+      </div>${saveBar('ev-save')}`;
+    };
+    const readAll = () => {
+      pane.querySelectorAll('[data-w]').forEach(i => { e.weights[i.dataset.w] = Number(i.value) || 0; });
+      pane.querySelectorAll('[data-g]').forEach(i => { e.grades[i.dataset.g][i.dataset.f] = i.dataset.f === 'min' ? Number(i.value) || 0 : i.value; });
+      pane.querySelectorAll('[data-c]').forEach(i => { e.criteria[i.dataset.c] = i.value; });
+      const ks = e.kpis[dept] || [];
+      pane.querySelectorAll('[data-k]').forEach(i => { ks[i.dataset.k][i.dataset.f] = ['target', 'weight'].includes(i.dataset.f) ? (i.value === '' ? '' : Number(i.value)) : i.value; });
+      const l = pane.querySelector('[name="salaryLink"]'); if (l) e.salaryLink = l.checked;
+    };
+    pane.oninput = (ev) => { if (ev.target.dataset.w != null) { readAll(); pane.querySelector('#ev-wsum').outerHTML = sumBadge(); } };
+    pane.onchange = (ev) => { if (ev.target.id === 'k-dept') { readAll(); dept = ev.target.value; draw(); } };
+    pane.onclick = (ev) => {
+      const b = ev.target.closest('button'); if (!b) return;
+      const redo = (fn) => { readAll(); fn(); draw(); };
+      if (b.id === 'g-add') redo(() => e.grades.push({ name: '', min: 0 }));
+      else if (b.id === 'c-add') redo(() => e.criteria.push(''));
+      else if (b.id === 'k-add') redo(() => { (e.kpis[dept] = e.kpis[dept] || []).push({ id: 'k' + Date.now().toString(36), name: '', unit: '', target: '', weight: 1 }); });
+      else if (b.dataset.gdel != null) redo(() => e.grades.splice(Number(b.dataset.gdel), 1));
+      else if (b.dataset.cdel != null) redo(() => e.criteria.splice(Number(b.dataset.cdel), 1));
+      else if (b.dataset.kdel != null) redo(() => e.kpis[dept].splice(Number(b.dataset.kdel), 1));
+      else if (b.id === 'ev-save') busy(b, async () => {
+        readAll();
+        if (wsum() <= 0) { toast(L('لازم محور واحد على الأقل يكون ليه وزن', 'At least one pillar needs a weight'), '', 'warn'); return; }
+        const grades = e.grades.filter(g => String(g.name).trim()).map(g => ({ name: String(g.name).trim().slice(0, 40), min: Math.max(0, Math.min(100, Number(g.min) || 0)) })).sort((a, b) => b.min - a.min);
+        if (!grades.length) { toast(L('لازم تقدير واحد على الأقل', 'Add at least one grade'), '', 'warn'); return; }
+        if (!grades.some(g => g.min === 0)) grades[grades.length - 1].min = 0;     // the lowest grade covers everything below
+        const kpis = {};
+        Object.entries(e.kpis).forEach(([d, ks]) => { kpis[d] = (ks || []).filter(k => String(k.name).trim()).map(k => ({ id: k.id || 'k' + Math.random().toString(36).slice(2, 8), name: String(k.name).trim().slice(0, 80), unit: String(k.unit || '').trim().slice(0, 20), target: Number(k.target) || 0, weight: Math.max(1, Math.min(10, Number(k.weight) || 1)) })); });
+        const next = { weights: e.weights, grades, criteria: e.criteria.map(c => String(c).trim().slice(0, 60)).filter(Boolean), kpis, salaryLink: !!e.salaryLink };
+        try { await saveEvalSettings(next); policy.evaluation = { ...(policy.evaluation || {}), ...next }; Object.assign(e, structuredClone(evalSettings())); toast(L('اتحفظت إعدادات التقييم', 'Review settings saved')); draw(); } catch (ex) { toastErr(ex); }
+      });
+    };
+    draw();
+  };
+  const show = (k) => {
+    root.querySelectorAll('#st .tab').forEach(t => t.classList.toggle('active', t.dataset.p === k));
+    pane.oninput = pane.onchange = pane.onclick = null;
+    P[k]();
+  };
   root.querySelectorAll('#st .tab').forEach(b => b.onclick = () => show(b.dataset.p));
-  show('work');
+  show(tabs.some(([k]) => k === params[0]) ? params[0] : 'work');
 }
