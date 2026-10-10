@@ -6,6 +6,9 @@ import { isAdmin, session, now } from '../core/session.js';
 import { policy, leaveTypes, holidays, savePolicy, saveLeaveTypes, saveHolidays, REQUEST_TYPES, typeLabel, DEFAULT_POLICY, activeRequestTypes } from '../core/policy.js';
 import { list, query, col, orderBy, limit, read, toMs, serverTimestamp } from '../core/fb.js';
 import { migrate } from '../services/migration.js';
+import { allPeople, officialDepartments, addDepartment } from '../services/directory.js';
+import { db, doc, writeBatch } from '../core/fb.js';
+import { track } from '../services/activity.js';
 
 const DAYS = () => isAr ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const FIXED_EG_HOLIDAYS = [
@@ -15,7 +18,7 @@ const FIXED_EG_HOLIDAYS = [
 
 export default async function render(root) {
   const tabs = [
-    ['work', L('مواعيد العمل', 'Work hours')], ['remote', L('الأونلاين والأذونات', 'Remote & permissions')], ['leave', L('أنواع الإجازات', 'Leave types')],
+    ['work', L('مواعيد العمل', 'Work hours')], ['depts', L('الأقسام', 'Departments')], ['remote', L('الأونلاين والأذونات', 'Remote & permissions')], ['leave', L('أنواع الإجازات', 'Leave types')],
     ['holidays', L('العطلات الرسمية', 'Public holidays')], ['flow', L('مسارات الموافقة', 'Approval flows')], ['pay', L('قواعد الخصم', 'Deduction rules')],
     ...(isAdmin() ? [['system', L('النظام والترحيل', 'System & migration')]] : [])
   ];
@@ -182,6 +185,67 @@ export default async function render(root) {
         });
       };
     }
+  };
+  /** move everyone written under `from` to `to` (rename / tidy) */
+  const moveDept = async (from, to) => {
+    const ppl = allPeople().filter(p => (p.department || '') === from);
+    for (let i = 0; i < ppl.length; i += 400) {
+      const b = writeBatch(db);
+      ppl.slice(i, i + 400).forEach(p => b.update(doc(db, 'users', p.email), { department: to }));
+      await b.commit();
+    }
+    return ppl.length;
+  };
+  P.depts = () => {
+    const official = officialDepartments();
+    const count = (d) => allPeople().filter(p => !p.isSuspended && (p.department || '') === d).length;
+    const others = [...new Set(allPeople().map(p => p.department || '').filter(d => d && !official.includes(d)))].sort();
+    const noDept = allPeople().filter(p => !p.isSuspended && !p.department).length;
+    pane.innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+      <section class="card"><div class="card-head"><h3><i class="fas fa-sitemap"></i> ${L('الأقسام', 'Departments')}</h3><button class="btn btn-primary btn-sm" id="d-add"><i class="fas fa-plus"></i> ${L('قسم جديد', 'New department')}</button></div>
+        <div class="card-body"><div class="dp-list">${official.map((d, i) => `<div class="dp-row"><b class="grow">${esc(d)}</b><span class="badge">${L(`${count(d)} موظف`, `${count(d)} people`)}</span>
+          <button class="btn btn-ghost btn-icon btn-sm" data-ren="${i}" title="${L('تعديل الاسم', 'Rename')}"><i class="fas fa-pen"></i></button>
+          <button class="btn btn-ghost btn-icon btn-sm" data-del="${i}" title="${count(d) ? L('فيه موظفين على القسم ده', 'Has employees') : L('حذف', 'Delete')}" ${count(d) ? 'disabled' : ''} style="color:var(--bad)"><i class="fas fa-trash"></i></button></div>`).join('')}</div>
+          ${noDept ? `<p class="xs muted mt-8"><i class="fas fa-circle-info"></i> ${L(`${noDept} موظف ملهمش قسم — حدّده من ملف كل واحد.`, `${noDept} people have no department — set it on their file.`)}</p>` : ''}</div></section>
+      <section class="card"><div class="card-head"><h3><i class="fas fa-wand-magic-sparkles"></i> ${L('توحيد الأقسام القديمة', 'Tidy old department names')}</h3></div>
+        <div class="card-body">${others.length ? `<p class="small muted mb-8">${L('الأسماء دي مكتوبة على ملفات موظفين ومش في القايمة. اختار القسم الصح لكل واحد ودوس «توحيد» — كل الموظفين اللي عليه بيتنقلوا.', 'These names are on employee files but not in the list. Pick the right department for each and press "Tidy" — everyone under it moves.')}</p>
+          <div class="dp-list">${others.map((d, i) => `<div class="dp-row"><span class="grow"><b>${esc(d)}</b> <small class="muted">${L(`${allPeople().filter(p => p.department === d).length} موظف`, `${allPeople().filter(p => p.department === d).length} people`)}</small></span>
+            <i class="fas fa-arrow-left muted" data-flip></i><select class="select select-sm" data-map="${i}"><option value="">${L('اختار…', 'Pick…')}</option>${official.map(o => `<option ${d.replace(/[^a-z]/gi, '').length >= 3 && o.toLowerCase().replace(/[^a-z]/g, '').slice(0, 3) === d.toLowerCase().replace(/[^a-z]/g, '').slice(0, 3) ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`).join('')}</div>
+          <div class="row mt-16"><button class="btn btn-primary" id="d-tidy"><i class="fas fa-wand-magic-sparkles"></i> ${L('توحيد', 'Tidy')}</button></div>`
+          : empty('fa-circle-check', L('كل الموظفين على أقسام من القايمة 👌', 'Everyone is on a listed department 👌'))}</div></section></div>`;
+    pane.querySelector('#d-add').onclick = async () => {
+      const name = await confirmDialog({ title: L('قسم جديد', 'New department'), okText: L('إضافة', 'Add'), input: { label: L('اسم القسم', 'Department name'), required: true } });
+      if (!name) return;
+      try { const n = await addDepartment(name); toast(L(`اتضاف قسم ${n}`, `${n} added`)); P.depts(); } catch (ex) { toastErr(ex); }
+    };
+    pane.querySelectorAll('[data-ren]').forEach(b => b.onclick = async () => {
+      const old = official[Number(b.dataset.ren)];
+      const name = await confirmDialog({ title: L(`تعديل اسم ${old}`, `Rename ${old}`), message: L('كل الموظفين اللي على القسم ده هيتنقلوا للاسم الجديد.', 'Everyone in it moves to the new name.'), okText: L('حفظ', 'Save'), input: { label: L('الاسم الجديد', 'New name'), required: true } });
+      const n = String(name || '').trim().slice(0, 60);
+      if (!n || n === old) return;
+      try {
+        const list = officialDepartments().map(d => d === old ? n : d).filter((d, i, a) => a.indexOf(d) === i);
+        await savePolicy({ departments: list }); policy.departments = list;
+        const moved = await moveDept(old, n);
+        track('settings.dept', { target: `${old} → ${n}`, detail: `${moved}` });
+        toast(L(`اتغيّر الاسم واتنقل ${moved} موظف`, `Renamed; ${moved} people moved`)); P.depts();
+      } catch (ex) { toastErr(ex); }
+    });
+    pane.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      const d = official[Number(b.dataset.del)];
+      if (!(await confirmDialog({ title: L(`حذف قسم ${d}`, `Delete ${d}`), okText: L('حذف', 'Delete'), okClass: 'btn-danger' }))) return;
+      try { const list = officialDepartments().filter(x => x !== d); await savePolicy({ departments: list }); policy.departments = list; P.depts(); } catch (ex) { toastErr(ex); }
+    });
+    const tidy = pane.querySelector('#d-tidy');
+    if (tidy) tidy.onclick = (e) => busy(e.currentTarget, async () => {
+      const pairs = others.map((d, i) => [d, pane.querySelector(`[data-map="${i}"]`).value]).filter(([, to]) => to);
+      if (!pairs.length) { toast(L('اختار القسم الصح الأول', 'Pick the right department first'), '', 'warn'); return; }
+      try {
+        let n = 0; for (const [from, to] of pairs) n += await moveDept(from, to);
+        track('settings.dept', { target: pairs.map(([a, b]) => `${a} → ${b}`).join('، '), detail: `${n}` });
+        toast(L(`اتوحّد ${n} موظف`, `${n} people tidied`)); P.depts();
+      } catch (ex) { toastErr(ex); }
+    });
   };
   const show = (k) => { root.querySelectorAll('#st .tab').forEach(t => t.classList.toggle('active', t.dataset.p === k)); P[k](); };
   root.querySelectorAll('#st .tab').forEach(b => b.onclick = () => show(b.dataset.p));

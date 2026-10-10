@@ -3,7 +3,9 @@
 import { read, ref, watch, setDoc, serverTimestamp } from './fb.js';
 import { L, zparts, ymd, addDays, weekday, hmToMin, minutesOfDay, dateRange } from './utils.js';
 
+export const DEFAULT_DEPARTMENTS = ['SEO', 'Content', 'Management', 'Development', 'Design'];
 export const DEFAULT_POLICY = {
+  departments: DEFAULT_DEPARTMENTS,   // the departments to pick from (Settings → Departments adds / renames)
   workStart: '09:00',
   workEnd: '17:00',
   graceMinutes: 15,

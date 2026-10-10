@@ -4,7 +4,7 @@ import { toast, toastErr, modal, avatar, presenceBadge, empty, busy, bindActions
 import { session, now, isAdmin } from '../core/session.js';
 import { ROLE_META, roleLabel, normRole, policy, leaveTypes } from '../core/policy.js';
 import { secondaryAuth, createUserWithEmailAndPassword, signOut, db, doc, setDoc, updateDoc, getDoc, writeBatch, serverTimestamp, read, list, query, col, where } from '../core/fb.js';
-import { allPeople, onDirectory, departments, person, nameOf } from '../services/directory.js';
+import { allPeople, onDirectory, departments, person, nameOf, officialDepartments, addDepartment } from '../services/directory.js';
 import { getBalance, adjustBalance, remaining, emptyBalance, balanceId } from '../services/requests.js';
 import { personMonthView } from './attendance.js';
 import { publicConfig, toLogin, callService } from '../services/authsvc.js';
@@ -114,7 +114,9 @@ export async function openEditor(email) {
         </div>
         <div data-pane="job" class="form-grid hidden">
           <div class="field"><label>${L('المسمى الوظيفي', 'Job title')}</label><input class="input" name="title" value="${esc(u.title || '')}"></div>
-          <div class="field"><label>${L('القسم', 'Department')}</label><input class="input" name="department" list="dl-dept" value="${esc(u.department || '')}"><datalist id="dl-dept">${deptList.map(d => `<option value="${esc(d)}">`).join('')}</datalist></div>
+          <div class="field"><label>${L('القسم', 'Department')}</label>
+            <div class="row gap-8"><select class="select grow" name="department"><option value="">${L('اختار القسم…', 'Pick a department…')}</option>${officialDepartments().map(d => `<option value="${esc(d)}" ${u.department === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}${u.department && !officialDepartments().includes(u.department) ? `<option value="${esc(u.department)}" selected>${esc(u.department)} ${L('(اسم قديم)', '(old name)')}</option>` : ''}</select>
+              <button type="button" class="btn btn-soft" id="dept-add" title="${L('إضافة قسم جديد', 'Add a department')}"><i class="fas fa-plus"></i> ${L('قسم', 'Dept')}</button></div></div>
           <div class="field"><label>${L('الدور في النظام', 'System role')}</label><select class="select" name="role" ${!isNew && email === session.email && !isAdmin() ? 'disabled' : ''}>${Object.keys(ROLE_META).filter(r => isAdmin() || r === normRole(u.role) || !['admin', 'finance', 'pm'].includes(r)).map(r => `<option value="${r}" ${normRole(u.role) === r ? 'selected' : ''}>${esc(roleLabel(r))}</option>`).join('')}</select></div>
           <div class="field"><label>${L('المدير المباشر', 'Direct manager')}</label><select class="select" name="leaderEmail"><option value="">${L('بدون (يروح لـ HR)', 'None (goes to HR)')}</option>${people.map(p => `<option value="${esc(p.email)}" ${u.leaderEmail === p.email ? 'selected' : ''}>${esc(p.name || p.email)} — ${esc(roleLabel(p.role))}</option>`).join('')}</select></div>
           <div class="row between span-2"><div><b>${L('يسجّل حضور وانصراف', 'Tracks attendance')}</b><div class="xs muted">${L('اقفلها للإدارة العليا أو اللي مش مطلوب منهم تسجيل — مش هيتحسب عليهم غياب ولا هيظهروا في تقارير الحضور.', 'Turn off for executives or anyone not required to clock in — no absence, not in attendance reports.')}</div></div><label class="switch"><input type="checkbox" name="trackAttendance" ${u.trackAttendance !== false ? 'checked' : ''}><span></span></label></div>
@@ -244,6 +246,16 @@ export async function openEditor(email) {
     if (td) td.onclick = () => teamBox.querySelectorAll('[data-member]').forEach(cb => { if (cb.dataset.dept === dept) cb.checked = true; });
   };
   f.role.onchange = drawTeam; f.department.onchange = drawTeam; drawTeam();
+  m.$('#dept-add').onclick = async () => {
+    const name = await confirmDialog({ title: L('قسم جديد', 'New department'), message: L('هيتضاف لقايمة الأقسام ويظهر لكل الموظفين بعد كده.', 'It is added to the list for every employee.'), okText: L('إضافة', 'Add'), input: { label: L('اسم القسم', 'Department name'), required: true } });
+    if (!name) return;
+    try {
+      const n = await addDepartment(name);
+      if (![...f.department.options].some(o => o.value === n)) f.department.insertAdjacentHTML('beforeend', `<option value="${esc(n)}">${esc(n)}</option>`);
+      f.department.value = n; drawTeam();
+      toast(L(`اتضاف قسم ${n}`, `${n} added`));
+    } catch (ex) { toastErr(ex); }
+  };
   // live balance: changing the entitlement moves "remaining" by the same amount
   m.$$('tr[data-lt] [data-ent]').forEach(inp => {
     let prev = Number(inp.value || 0);
